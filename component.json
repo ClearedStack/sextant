@@ -1,0 +1,29 @@
+{
+  "slug": "sextant",
+  "name": "Sextant",
+  "formerly": "cs-02-observe",
+  "earlierNames": [
+    "Spyglass"
+  ],
+  "kind": "worker",
+  "stage": 2,
+  "namespace": "cs-workers",
+  "responsibility": "Reads a candidate's public pages and writes down what job it does, copying nothing.",
+  "interfaces": [
+    "Leases work from Muster over cluster-private HTTP",
+    "Fetches public pages over HTTPS, and starts a temporary browser job when a page needs one"
+  ],
+  "repository": "sextant",
+  "image": "sextant",
+  "dependsOn": [
+    "muster"
+  ],
+  "memory": "30 MiB",
+  "version": "v0.1.0-draft",
+  "subTools": [
+    "saas-marketing",
+    "gov-portal",
+    "agency-pdf",
+    "on-demand-browser-job"
+  ]
+}
