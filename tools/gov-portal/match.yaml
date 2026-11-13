@@ -1,0 +1,163 @@
+# gov-portal: federal .gov and .mil portals and calculators.
+#
+# This file is the matching rule and every word list the extractor uses.
+# Values on the right-hand side of "value:" and "kind:" must come from the
+# closed vocabularies in internal/observation; loading fails otherwise.
+tool: gov-portal
+
+# --- Matching rule -----------------------------------------------------------
+# The sub-tool matches a page when all of these hold:
+#   1. the address uses one of these schemes and its host ends in one of
+#      these suffixes;
+#   2. the page is an HTML document;
+#   3. after setting aside forms whose role is listed under ignore_form_roles,
+#      exactly one form is left. That form is "the tool".
+# Anything else is not this sub-tool's page.
+match:
+  schemes:
+    - https
+  host_suffixes:
+    - .gov
+    - .mil
+  ignore_form_roles:
+    - search
+
+# --- Form controls -----------------------------------------------------------
+# Controls are written "input:<type>" or as the bare tag name. An <input> with
+# no type attribute is "input:text", as HTML defines. A control in the tool
+# form that is in none of the lists below pauses the item (E_NEEDS_SUBTOOL).
+controls:
+  ignored:
+    - input:hidden
+    - input:submit
+    - input:button
+    - input:reset
+    - button
+  credential:
+    - input:password
+  # Controls that share a name attribute and count as one field.
+  grouped_by_name:
+    - input:radio
+  kinds:
+    - kind: text
+      controls:
+        - input:text
+        - input:email
+        - input:tel
+        - input:url
+        - textarea
+    - kind: number
+      controls:
+        - input:number
+    - kind: date
+      controls:
+        - input:date
+    - kind: choice
+      controls:
+        - select
+        - input:radio
+        - input:checkbox
+    - kind: file
+      controls:
+        - input:file
+
+# --- Word lists --------------------------------------------------------------
+# Phrases are matched as plain substrings of the page's text after it has been
+# lower-cased and its white space collapsed to single spaces. Within one list,
+# no rule matching leaves the fact Unknown, one value matching gives that
+# value as Stated, and two different values matching pauses the item.
+
+# Looked for in the <title> and <h1> text only.
+core_job:
+  - value: date_calculation
+    phrases:
+      - due date calculator
+      - deadline calculator
+      - date calculator
+  - value: amount_calculation
+    phrases:
+      - cost calculator
+      - fee calculator
+      - rate calculator
+      - estimator
+  - value: eligibility_check
+    phrases:
+      - eligibility checker
+      - eligibility tool
+      - check your eligibility
+  - value: record_search
+    phrases:
+      - records search
+      - search records
+      - lookup tool
+
+# Looked for in all visible text. Used only when the tool form has no
+# credential control; a credential control is Seen and settles the matter.
+login_requirement:
+  - value: not_required
+    phrases:
+      - no account is needed
+      - no account needed
+      - no login required
+      - no sign-in required
+  - value: required
+    phrases:
+      - you must sign in
+      - sign in to continue
+      - login is required
+
+license_or_copyright:
+  - value: public_domain
+    phrases:
+      - in the public domain
+      - public domain work
+  - value: copyright_asserted
+    phrases:
+      - all rights reserved
+      - ©
+  - value: open_license
+    phrases:
+      - creative commons
+      - open government licence
+
+price_model:
+  - value: free
+    phrases:
+      - free to use
+      - at no cost
+      - no charge
+  - value: paid
+    phrases:
+      - subscription required
+      - per-user fee
+
+# Used only when the tool form declares no server address to submit to; a
+# declared address is Seen as server_round_trip and settles the matter.
+offline_behavior:
+  - value: works_offline
+    phrases:
+      - works offline
+      - runs entirely in your browser
+      - nothing you enter leaves your device
+  - value: server_round_trip
+    phrases:
+      - requires an internet connection
+      - your entries are sent to our server
+
+# --- Public-rule citations ---------------------------------------------------
+# Each pattern is a Go (RE2) regular expression run over the visible text with
+# white space collapsed. "write" is the normalised citation; $1 is the first
+# group. Every match is recorded, sorted, without duplicates, as Seen.
+citations:
+  - family: FAR
+    pattern: '\bFAR\s+(?:[Cc]lause\s+)?(\d{1,2}\.\d{3,4}(?:-\d{1,4})?)\b'
+    write: 'FAR $1'
+  - family: FAR
+    pattern: '\bFAR\s+Part\s+(\d{1,2})\b'
+    write: 'FAR Part $1'
+  - family: DFARS
+    pattern: '\bDFARS\s+(?:[Cc]lause\s+)?(2\d{2}\.\d{3,4}(?:-\d{4})?)\b'
+    write: 'DFARS $1'
+  - family: NIST
+    pattern: '\bNIST\s+(?:SP|Special Publication)\s+(800-\d{1,3}[A-Z]?)\b'
+    write: 'NIST SP $1'

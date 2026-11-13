@@ -1,0 +1,8 @@
+{
+  "item_id": "PA-0203",
+  "outcome": "fail",
+  "error": {
+    "code": "E_PARSE",
+    "reason": "form_tags_do_not_pair_up"
+  }
+}

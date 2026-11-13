@@ -1,0 +1,8 @@
+{
+  "item_id": "PA-0106",
+  "outcome": "needs_subtool",
+  "error": {
+    "code": "E_NEEDS_SUBTOOL",
+    "reason": "more_than_one_price_model_rule_matches"
+  }
+}
