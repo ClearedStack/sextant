@@ -1,0 +1,6 @@
+# The sub-tools Sextant has, in the order they are tried.
+# A sub-tool is listed here only once its rule, logic and fixtures all exist.
+# Names come from component.json ("subTools") or are a vendor slug.
+tools:
+  - name: gov-portal
+    folder: tools/gov-portal

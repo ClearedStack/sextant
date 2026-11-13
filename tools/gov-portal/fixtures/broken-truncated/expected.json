@@ -1,0 +1,8 @@
+{
+  "item_id": "PA-0201",
+  "outcome": "fail",
+  "error": {
+    "code": "E_PARSE",
+    "reason": "markup_ends_inside_a_construct"
+  }
+}

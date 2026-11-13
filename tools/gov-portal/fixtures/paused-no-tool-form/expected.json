@@ -1,0 +1,8 @@
+{
+  "item_id": "PA-0101",
+  "outcome": "needs_subtool",
+  "error": {
+    "code": "E_NEEDS_SUBTOOL",
+    "reason": "no_matching_sub_tool"
+  }
+}

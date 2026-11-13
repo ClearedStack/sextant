@@ -1,0 +1,8 @@
+{
+  "item_id": "PA-0205",
+  "outcome": "fail",
+  "error": {
+    "code": "E_PARSE",
+    "reason": "resource_address_does_not_parse"
+  }
+}

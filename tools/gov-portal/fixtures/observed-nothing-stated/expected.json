@@ -1,0 +1,47 @@
+{
+  "item_id": "PA-0005",
+  "source_url": "https://worksheet.example-agency.gov/w",
+  "sub_tool": "gov-portal",
+  "observed_on": "2026-01-15",
+  "core_job": {
+    "value": null,
+    "tier": "Unknown"
+  },
+  "inputs": {
+    "fields": [
+      {
+        "kind": "number",
+        "required": false
+      }
+    ],
+    "tier": "Seen"
+  },
+  "outputs": {
+    "fields": [],
+    "tier": "Unknown"
+  },
+  "login_requirement": {
+    "value": null,
+    "tier": "Unknown"
+  },
+  "tracking": {
+    "external_hosts": [],
+    "tier": "Seen"
+  },
+  "license_or_copyright": {
+    "value": null,
+    "tier": "Unknown"
+  },
+  "price_model": {
+    "value": null,
+    "tier": "Unknown"
+  },
+  "cited_public_rules": {
+    "citations": [],
+    "tier": "Unknown"
+  },
+  "offline_behavior": {
+    "value": null,
+    "tier": "Unknown"
+  }
+}
