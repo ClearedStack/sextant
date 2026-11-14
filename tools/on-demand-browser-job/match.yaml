@@ -1,0 +1,123 @@
+# on-demand-browser-job: extracts structured facts from rendered DOM and
+# observed client-side network logs produced by an ephemeral headless browser
+# Job for JavaScript single-page applications.
+tool: on-demand-browser-job
+
+match:
+  schemes:
+    - https
+  capture_format: sextant-browser-capture/v1
+  ignore_form_roles:
+    - search
+
+controls:
+  ignored:
+    - input:hidden
+    - input:submit
+    - input:button
+    - input:reset
+    - button
+  credential:
+    - input:password
+  grouped_by_name:
+    - input:radio
+  kinds:
+    - kind: text
+      controls:
+        - input:text
+        - input:email
+        - input:tel
+        - input:url
+        - textarea
+    - kind: number
+      controls:
+        - input:number
+    - kind: date
+      controls:
+        - input:date
+    - kind: choice
+      controls:
+        - select
+        - input:radio
+        - input:checkbox
+    - kind: file
+      controls:
+        - input:file
+
+outputs:
+  tags:
+    - output
+  roles:
+    - status
+  kind: computed_value
+
+network:
+  round_trip_methods:
+    - POST
+    - PUT
+    - PATCH
+  round_trip_path_prefixes:
+    - /api/
+    - /graphql
+
+core_job:
+  - value: config_validation
+    phrases:
+      - sbom validator
+      - policy validator
+      - manifest validator
+  - value: control_mapping
+    phrases:
+      - control mapper
+      - cmmc control crosswalk
+  - value: rate_calculation
+    phrases:
+      - wrap rate calculator
+      - escalation calculator
+
+login_requirement:
+  - value: not_required
+    phrases:
+      - no account required
+      - runs in browser without login
+  - value: required
+    phrases:
+      - sign in required
+      - workspace login
+
+license_or_copyright:
+  - value: open_license
+    phrases:
+      - apache 2.0 license
+      - mit license
+  - value: copyright_asserted
+    phrases:
+      - all rights reserved
+      - ©
+  - value: public_domain
+    phrases:
+      - in the public domain
+
+price_model:
+  - value: free
+    phrases:
+      - free open tool
+      - free to use
+  - value: paid
+    phrases:
+      - enterprise license
+      - paid subscription
+
+citations:
+  - family: FAR
+    pattern: '\bFAR\s+(?:[Cc]lause\s+)?(\d{1,2}\.\d{3,4}(?:-\d{1,4})?)\b'
+    write: 'FAR $1'
+  - family: FAR
+    pattern: '\bFAR\s+Part\s+(\d{1,2})\b'
+    write: 'FAR Part $1'
+  - family: DFARS
+    pattern: '\bDFARS\s+(?:[Cc]lause\s+)?(2\d{2}\.\d{3,4}(?:-\d{4})?)\b'
+    write: 'DFARS $1'
+  - family: NIST
+    pattern: '\bNIST\s+(?:SP|Special Publication)\s+(800-\d{1,3}[A-Z]?)\b'
+    write: 'NIST SP $1'

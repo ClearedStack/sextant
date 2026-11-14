@@ -1,0 +1,8 @@
+{
+  "item_id": "PA-0406",
+  "outcome": "fail",
+  "error": {
+    "code": "E_PARSE",
+    "reason": "invalid_browser_capture_envelope"
+  }
+}

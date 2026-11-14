@@ -1,0 +1,48 @@
+{
+  "item_id": "PA-0303",
+  "source_url": "https://pubs.example-agency.gov/section-l.pdf",
+  "sub_tool": "agency-pdf",
+  "observed_on": "2026-01-15",
+  "publication_date": {
+    "value": null,
+    "tier": "Unknown"
+  },
+  "core_job": {
+    "value": "compliance_matrix",
+    "tier": "Stated"
+  },
+  "inputs": {
+    "fields": [],
+    "tier": "Unknown"
+  },
+  "outputs": {
+    "fields": [],
+    "tier": "Unknown"
+  },
+  "login_requirement": {
+    "value": null,
+    "tier": "Unknown"
+  },
+  "tracking": {
+    "external_hosts": [],
+    "tier": "Seen"
+  },
+  "license_or_copyright": {
+    "value": "copyright_asserted",
+    "tier": "Stated"
+  },
+  "price_model": {
+    "value": "paid",
+    "tier": "Stated"
+  },
+  "cited_public_rules": {
+    "citations": [
+      "NIST SP 800-171"
+    ],
+    "tier": "Seen"
+  },
+  "offline_behavior": {
+    "value": "server_round_trip",
+    "tier": "Seen"
+  }
+}

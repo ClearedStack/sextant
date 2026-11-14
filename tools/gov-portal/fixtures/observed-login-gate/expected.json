@@ -1,0 +1,42 @@
+{
+  "item_id": "PA-0002",
+  "source_url": "https://portal.example-command.mil/rates",
+  "sub_tool": "gov-portal",
+  "observed_on": "2026-01-15",
+  "core_job": {
+    "value": "amount_calculation",
+    "tier": "Stated"
+  },
+  "inputs": {
+    "fields": [],
+    "tier": "Unknown"
+  },
+  "outputs": {
+    "fields": [],
+    "tier": "Unknown"
+  },
+  "login_requirement": {
+    "value": "required",
+    "tier": "Seen"
+  },
+  "tracking": {
+    "external_hosts": [],
+    "tier": "Seen"
+  },
+  "license_or_copyright": {
+    "value": "copyright_asserted",
+    "tier": "Stated"
+  },
+  "price_model": {
+    "value": null,
+    "tier": "Unknown"
+  },
+  "cited_public_rules": {
+    "citations": [],
+    "tier": "Unknown"
+  },
+  "offline_behavior": {
+    "value": "works_offline",
+    "tier": "Stated"
+  }
+}

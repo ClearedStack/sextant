@@ -1,0 +1,8 @@
+{
+  "item_id": "PA-0304",
+  "outcome": "needs_subtool",
+  "error": {
+    "code": "E_NEEDS_SUBTOOL",
+    "reason": "encrypted_pdf_not_supported"
+  }
+}

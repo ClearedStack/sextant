@@ -39,11 +39,11 @@ Sextant communicates exclusively with Muster in the `clearedstack` namespace ove
 
 - **Queue consumption:** Polls Muster using `lease`, `heartbeat`, `complete`, `fail`, and `needs_subtool`, draining priority lanes in strict order: `urgent` → `normal` → `backfill`.
 - **Inbound states:**
-  - `recorded` — Newly deduplicated `PA-XXXX` candidates from Trawl.
-  - `observed` (re-queued) — Items returned from `needs_subtool` replay after a sub-tool fix ships, `parked` items whose blocker cleared in Tidegauge, or `linked` items flagged for drift.
+  - `recorded`: Newly deduplicated `PA-XXXX` candidates from Trawl.
+  - `observed` (re-queued): Items returned from `needs_subtool` replay after a sub-tool fix ships, `parked` items whose blocker cleared in Tidegauge, or `linked` items flagged for drift.
 - **Outbound transitions:**
-  - `observed` — Extraction succeeded; sanitized structured JSON facts are stored in `core.*` and raw captures remain sealed behind the clean-room wall.
-  - `needs_subtool` — Fail-closed pause (`E_NEEDS_SUBTOOL`) when no registered sub-tool matches the target layout.
+  - `observed`: Extraction succeeded; sanitized structured JSON facts are stored in `core.*` and raw captures remain sealed behind the clean-room wall.
+  - `needs_subtool`: Fail-closed pause (`E_NEEDS_SUBTOOL`) when no registered sub-tool matches the target layout.
 - **Spool durability:** Extracted payloads are written to `/var/spool/cs` before acknowledging `complete` to Muster, preventing lost work during control-plane restarts.
 
 ## Sub-Tools & Failure Modes
@@ -73,6 +73,15 @@ Sextant never guesses when an extraction fails or encounters an unknown layout:
 - **Passive public boundaries:** Sextant never creates accounts, starts free trials, submits lead-capture forms, enters real contracting data, or circumvents paywalls, `robots.txt`, or CAPTCHAs. If a tool sits behind a login or anti-bot gate, observation stops at the public surface and records vendor claims as `Stated` rather than `Seen`.
 - **Strict clean-room wall:** Raw HTML, DOM trees, stylesheets, client-side scripts, and binary PDFs are sealed at Sextant and never cross into Waybill or Moldloft. Muster enforces this contract boundary by rejecting any build payload containing raw observation artifacts.
 - **Pod hardening & network policy:** Runs as an unprivileged non-root user with dropped Linux capabilities, no privilege escalation, and a read-only root filesystem (writable only at `/var/spool/cs`). Default-deny Kubernetes `NetworkPolicy` allows outbound HTTP/HTTPS for public fetches and cluster-private HTTP to Muster, while blocking direct access to Logbook, Plainforge, and Lazarette.
+
+## Proposed changes & contract v1 alignment
+
+The implementation in this repository resolves four open details in the draft specification above without inventing Muster calls, fields, or states:
+
+1. **Inbound state in Muster contract v1 (`recorded` -> `observed`):** `ClearedStack/muster` `contract/v1/CONTRACT.md` assigns `sextant` exclusively to `recorded` -> `observed` (queued next for `assay`). When Sextant pauses an item via `POST /v1/needs_subtool`, Muster records `paused_from = recorded` and returns the item to `recorded` when Shipkeeper reports a changed Sextant image digest. Re-queuing from `parked` or `linked` back into Sextant is not yet in `CONTRACT.md` and is not assumed here.
+2. **Closed observation record schema (`results.sextant`):** Completed observations pass a validated `observation.Record` object as `result` on `POST /v1/complete` (`item_id`, `source_url`, `sub_tool`, `observed_on`, optional `publication_date` on `agency-pdf`, and tiered facts `core_job`, `inputs`, `outputs`, `login_requirement`, `tracking`, `license_or_copyright`, `price_model`, `cited_public_rules`, `offline_behavior`). Raw HTML, DOM snapshots, and PDF bytes are wiped in memory immediately after extraction and never written to `/var/spool/cs`.
+3. **Ephemeral browser `Job` boundary:** Creating `batch/v1` `Job` pods from inside Sextant would require Kubernetes API egress and `jobs/create` RBAC, conflicting with Sextant's least-privilege `NetworkPolicy` (DNS, Muster, and public HTTPS only) and requiring a digest-pinned headless browser image in Lazarette. `tools/on-demand-browser-job` therefore consumes a strict capture envelope (`sextant-browser-capture/v1`) via `fetch.BrowserRunner`; when no runner is configured in-cluster, JavaScript-only SPA shells fail closed with `E_NEEDS_SUBTOOL` (`browser_job_runner_not_configured`).
+4. **HTTPS-only external egress:** Because Sextant refuses plain `http://` targets, `deploy/networkpolicy.yaml` opens public egress on TCP 443 only while blocking private, loopback, CGNAT, link-local, multicast, and LAN CIDRs.
 
 ## Related pages
 

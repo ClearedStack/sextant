@@ -1,0 +1,8 @@
+{
+  "item_id": "PA-0307",
+  "outcome": "fail",
+  "error": {
+    "code": "E_PARSE",
+    "reason": "corrupted_pdf_structure"
+  }
+}

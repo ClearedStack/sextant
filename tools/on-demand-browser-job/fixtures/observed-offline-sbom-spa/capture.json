@@ -1,0 +1,14 @@
+{
+  "format": "sextant-browser-capture/v1",
+  "rendered_html": "<!DOCTYPE html><html><head><title>SBOM validator</title></head><body>\n<h1>SBOM validator</h1>\n<p>Runs in browser without login. Apache 2.0 License. Free open tool under NIST SP 800-171. zzcanary</p>\n<form>\n  <input type=\"file\" name=\"sbom_zzcanary\" required>\n  <input type=\"text\" name=\"filter_zzcanary\">\n  <input type=\"number\" name=\"limit_zzcanary\" required>\n  <input type=\"date\" name=\"baseline_zzcanary\">\n  <select name=\"format_zzcanary\"><option>spdx</option></select>\n  <output>valid</output>\n</form>\n</body></html>",
+  "network_requests": [
+    {
+      "method": "GET",
+      "url": "https://sbom.example-tools.org/bundle.js"
+    },
+    {
+      "method": "GET",
+      "url": "https://sbom.example-tools.org/schema.wasm"
+    }
+  ]
+}

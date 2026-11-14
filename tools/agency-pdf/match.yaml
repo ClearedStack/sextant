@@ -1,0 +1,108 @@
+# agency-pdf: downloadable procurement PDFs, worksheets, and instructions on
+# federal .gov and .mil HTTPS hosts.
+#
+# Values on the right-hand side of "value:" and "kind:" must come from the
+# closed vocabularies in internal/observation; loading fails otherwise.
+tool: agency-pdf
+
+match:
+  schemes:
+    - https
+  host_suffixes:
+    - .gov
+    - .mil
+  pdf_prefixes:
+    - '%PDF-1.'
+
+# AcroForm field mappings (/FT values, lower-cased without leading slash).
+# Bit 1 of /Ff (value 1) marks a read-only calculated worksheet output; bit 2
+# (value 2) marks a required input; bit 17 (value 65536) on btn is a pushbutton
+# and is ignored. Any /FT not listed here pauses with E_NEEDS_SUBTOOL.
+acroform:
+  ignored_button_flag: '65536'
+  readonly_flag: '1'
+  required_flag: '2'
+  readonly_output_kind: computed_value
+  field_kinds:
+    - ft: tx
+      kind: text
+    - ft: ch
+      kind: choice
+    - ft: btn
+      kind: choice
+
+publication_dates:
+  info_keys:
+    - CreationDate
+  text_patterns:
+    - '\b(?:Published|Publication Date|Issued):\s*(\d{4}-\d{2}-\d{2})\b'
+
+core_job:
+  - value: amount_calculation
+    phrases:
+      - price evaluation worksheet
+      - cost worksheet
+      - fee worksheet
+  - value: eligibility_check
+    phrases:
+      - size standard worksheet
+      - representation checklist
+      - eligibility worksheet
+  - value: compliance_matrix
+    phrases:
+      - solicitation instruction matrix
+      - section l compliance checklist
+
+login_requirement:
+  - value: not_required
+    phrases:
+      - no account required
+      - public worksheet
+  - value: required
+    phrases:
+      - submit through registered portal account
+
+license_or_copyright:
+  - value: public_domain
+    phrases:
+      - u.s. government work
+      - in the public domain
+      - approved for public release
+  - value: open_license
+    phrases:
+      - creative commons
+  - value: copyright_asserted
+    phrases:
+      - all rights reserved
+
+price_model:
+  - value: free
+    phrases:
+      - provided at no cost
+      - free public download
+  - value: paid
+    phrases:
+      - purchase fee applies
+
+offline_behavior:
+  - value: works_offline
+    phrases:
+      - complete offline
+      - fillable offline
+  - value: server_round_trip
+    phrases:
+      - requires online validation
+
+citations:
+  - family: FAR
+    pattern: '\bFAR\s+(?:[Cc]lause\s+)?(\d{1,2}\.\d{3,4}(?:-\d{1,4})?)\b'
+    write: 'FAR $1'
+  - family: FAR
+    pattern: '\bFAR\s+Part\s+(\d{1,2})\b'
+    write: 'FAR Part $1'
+  - family: DFARS
+    pattern: '\bDFARS\s+(?:[Cc]lause\s+)?(2\d{2}\.\d{3,4}(?:-\d{4})?)\b'
+    write: 'DFARS $1'
+  - family: NIST
+    pattern: '\bNIST\s+(?:SP|Special Publication)\s+(800-\d{1,3}[A-Z]?)\b'
+    write: 'NIST SP $1'

@@ -1,0 +1,18 @@
+{
+  "format": "sextant-browser-capture/v1",
+  "rendered_html": "<!DOCTYPE html><html><head><title>CMMC control crosswalk</title></head><body>\n<h1>CMMC control crosswalk</h1>\n<p>Sign in required for export. All rights reserved. Paid subscription. DFARS 252.204-7012 and FAR 52.204-21. zzcanary</p>\n<form>\n  <input type=\"radio\" name=\"level\" required>\n  <input type=\"radio\" name=\"level\">\n  <div role=\"status\">mapped</div>\n</form>\n</body></html>",
+  "network_requests": [
+    {
+      "method": "GET",
+      "url": "https://cmmc.example-saas.net/app.js"
+    },
+    {
+      "method": "POST",
+      "url": "https://api.example-saas.net/v1/map"
+    },
+    {
+      "method": "GET",
+      "url": "https://telemetry.example-metrics.io/ping"
+    }
+  ]
+}

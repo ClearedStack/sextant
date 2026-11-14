@@ -1,0 +1,51 @@
+{
+  "item_id": "PA-0003",
+  "source_url": "https://forms.example-bureau.gov/eligibility?step=1",
+  "sub_tool": "gov-portal",
+  "observed_on": "2026-01-15",
+  "core_job": {
+    "value": "eligibility_check",
+    "tier": "Stated"
+  },
+  "inputs": {
+    "fields": [
+      {
+        "kind": "choice",
+        "required": false
+      },
+      {
+        "kind": "file",
+        "required": false
+      }
+    ],
+    "tier": "Seen"
+  },
+  "outputs": {
+    "fields": [],
+    "tier": "Unknown"
+  },
+  "login_requirement": {
+    "value": null,
+    "tier": "Unknown"
+  },
+  "tracking": {
+    "external_hosts": [],
+    "tier": "Seen"
+  },
+  "license_or_copyright": {
+    "value": null,
+    "tier": "Unknown"
+  },
+  "price_model": {
+    "value": null,
+    "tier": "Unknown"
+  },
+  "cited_public_rules": {
+    "citations": [],
+    "tier": "Unknown"
+  },
+  "offline_behavior": {
+    "value": "server_round_trip",
+    "tier": "Seen"
+  }
+}
