@@ -1,0 +1,139 @@
+{
+  "facts": {
+    "best_alternative": {
+      "type": "enum",
+      "values": [
+        "none",
+        "paid_only",
+        "outdated",
+        "partial",
+        "complete"
+      ]
+    },
+    "client_runtime": {
+      "type": "enum",
+      "values": [
+        "browser_js",
+        "browser_wasm",
+        "desktop_native",
+        "server_side"
+      ]
+    },
+    "community_demand": {
+      "max": 100000,
+      "min": 0,
+      "type": "int"
+    },
+    "connect_src_self": {
+      "type": "bool"
+    },
+    "core_job": {
+      "type": "enum",
+      "values": [
+        "rate_calculation",
+        "amount_calculation",
+        "cost_allocation",
+        "price_escalation",
+        "price_table_lookup",
+        "interest_calculation",
+        "date_calculation",
+        "eligibility_check",
+        "record_search",
+        "multi_workflow",
+        "portal_suite",
+        "open_ended_advisory"
+      ]
+    },
+    "emits_tracking": {
+      "type": "bool"
+    },
+    "est_source_lines": {
+      "max": 1000000,
+      "min": 1,
+      "type": "int"
+    },
+    "largest_input_kb": {
+      "max": 10000000,
+      "min": 0,
+      "type": "int"
+    },
+    "need_signals": {
+      "max": 100000,
+      "min": 0,
+      "type": "int"
+    },
+    "needs_account": {
+      "type": "bool"
+    },
+    "needs_backend": {
+      "type": "bool"
+    },
+    "needs_remote_api": {
+      "type": "bool"
+    },
+    "output_kinds": {
+      "type": "list",
+      "values": [
+        "computed_number",
+        "structured_data",
+        "citation_lookup",
+        "legal_advice",
+        "compliance_determination"
+      ]
+    },
+    "rate_tables": {
+      "max": 1000,
+      "min": 0,
+      "type": "int"
+    },
+    "reference_updates_per_year": {
+      "max": 1000,
+      "min": 0,
+      "type": "int"
+    },
+    "roadmap_phase_fit": {
+      "max": 3,
+      "min": 0,
+      "type": "int"
+    },
+    "source_kind": {
+      "type": "enum",
+      "values": [
+        "statute",
+        "far",
+        "dfars",
+        "nist_sp",
+        "agency_publication",
+        "vendor_document",
+        "paywalled_standard",
+        "unpublished"
+      ]
+    },
+    "source_precision": {
+      "type": "enum",
+      "values": [
+        "exact_formula",
+        "lookup_table",
+        "defined_procedure",
+        "general_principle"
+      ]
+    },
+    "source_public": {
+      "type": "bool"
+    },
+    "task_count": {
+      "max": 100,
+      "min": 1,
+      "type": "int"
+    },
+    "worked_examples": {
+      "max": 10000,
+      "min": 0,
+      "type": "int"
+    },
+    "works_offline": {
+      "type": "bool"
+    }
+  },
+  "source": "ClearedStack/assay, branch sync/authoring-cli-v3-fuzz-and-ci, tools/rubric-profiles/pricing/profile.yaml, profile pricing version 3, the facts: section, copied unchanged"
+}
