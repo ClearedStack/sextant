@@ -1,8 +1,11 @@
 package spool
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ClearedStack/sextant/internal/derive"
@@ -154,6 +157,158 @@ func TestSpoolRejectsUnsanitizedOrInvalidEntries(t *testing.T) {
 	for i, tc := range cases {
 		if _, err := s.Stage(tc); err == nil {
 			t.Fatalf("case %d: expected Stage to reject invalid entry %+v", i, tc)
+		}
+	}
+}
+
+func logged(t *testing.T, s *Spool) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	s.SetLog(&buf)
+	return &buf
+}
+
+func writePending(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	p := filepath.Join(dir, "pending", name)
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestPendingLogsOneFixedLineForEachQuarantinedEntry(t *testing.T) {
+	good, err := json.Marshal(Entry{Sequence: 5, Lease: "PA-0001.1.1", ItemID: "PA-0001", Outcome: OutcomeComplete, State: "observed", Result: sampleValidRecord()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An entry the previous build wrote: a "record" where this build wants a "result".
+	legacy := `{"sequence":1,"lease":"PA-0001.1.1","item_id":"PA-0001","outcome":"complete","state":"observed","record":{"item_id":"PA-0001","zzcanary":"x"}}`
+	invalid := strings.Replace(string(good), `"observed"`, `"scored"`, 1)
+	tests := []struct{ name, body, line string }{
+		{"legacy", legacy, `{"event":"spool_quarantined","reason":"legacy_record_format"}`},
+		{"undecodable", `{not json zzcanary`, `{"event":"spool_quarantined","reason":"undecodable"}`},
+		{"invalid", invalid, `{"event":"spool_quarantined","reason":"failed_validation"}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			s, err := Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			buf := logged(t, s)
+			writePending(t, dir, "0000000000000001-zzcanary.json", tc.body)
+			if got, err := s.Pending(); err != nil || len(got) != 0 {
+				t.Fatalf("Pending = %v, %v", got, err)
+			}
+			if buf.String() != tc.line+"\n" {
+				t.Fatalf("log = %q, want %q", buf.String(), tc.line+"\n")
+			}
+			if _, err := os.Stat(filepath.Join(dir, "quarantine", "0000000000000001-zzcanary.json")); err != nil {
+				t.Fatalf("not in quarantine: %v", err)
+			}
+		})
+	}
+}
+
+func TestFailedQuarantineIsReportedOnceAndDoesNotBlockOrSpin(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := logged(t, s)
+	bad := writePending(t, dir, "0000000000000001-bad.json", `{broken`)
+	if _, err := s.Stage(Entry{Lease: "PA-0002.1.1", ItemID: "PA-0002", Outcome: OutcomeNeedsSubtool, Code: errcode.NeedsSubtool, Reason: errcode.NoMatchingSubTool}); err != nil {
+		t.Fatal(err)
+	}
+	// The move fails: there is no quarantine directory to move into.
+	if err := os.RemoveAll(filepath.Join(dir, "quarantine")); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		got, err := s.Pending()
+		if err != nil || len(got) != 1 || got[0].ItemID != "PA-0002" {
+			t.Fatalf("pass %d: the good entry must still be delivered: %v, %v", i, got, err)
+		}
+	}
+	if want := `{"event":"spool_quarantine_failed","reason":"move_failed"}` + "\n"; buf.String() != want {
+		t.Fatalf("log = %q, want exactly one line %q", buf.String(), want)
+	}
+	if _, err := os.Stat(bad); err != nil {
+		t.Fatalf("the evidence must stay where it is: %v", err)
+	}
+}
+
+func TestUnreadablePendingFileIsReportedOnce(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := logged(t, s)
+	// A dangling link is listed by ReadDir but cannot be read.
+	if err := os.Symlink(filepath.Join(dir, "nowhere"), filepath.Join(dir, "pending", "0000000000000001-zzcanary.json")); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if got, err := s.Pending(); err != nil || len(got) != 0 {
+			t.Fatalf("Pending = %v, %v", got, err)
+		}
+	}
+	if want := `{"event":"spool_read_failed","reason":"read_failed"}` + "\n"; buf.String() != want {
+		t.Fatalf("log = %q, want %q", buf.String(), want)
+	}
+}
+
+func TestQuarantineNeverOverwritesEarlierEvidence(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logged(t, s)
+	name := "0000000000000001-x.json"
+	// Two corrupt files with the same name arrive one after the other.
+	for _, body := range []string{`{first`, `{second`, `{third`} {
+		writePending(t, dir, name, body)
+		if _, err := s.Pending(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// And one through Quarantine, which the worker uses for refused entries.
+	e, err := s.Stage(Entry{Lease: "PA-0003.1.1", ItemID: "PA-0003", Outcome: OutcomeNeedsSubtool, Code: errcode.NeedsSubtool, Reason: errcode.NoMatchingSubTool})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		raw, err := os.ReadFile(e.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Quarantine(e); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(e.path, raw, 0o600); err != nil { // the same file name again
+			t.Fatal(err)
+		}
+	}
+	files, err := os.ReadDir(filepath.Join(dir, "quarantine"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 5 { // three corrupt files, two quarantined entries (the third copy is still pending)
+		t.Fatalf("quarantine holds %d files, want 5", len(files))
+	}
+	seen := map[string]bool{}
+	for _, f := range files {
+		raw, _ := os.ReadFile(filepath.Join(dir, "quarantine", f.Name()))
+		seen[string(raw)] = true
+	}
+	for _, want := range []string{"{first", "{second", "{third"} {
+		if !seen[want] {
+			t.Errorf("evidence %q was overwritten", want)
 		}
 	}
 }

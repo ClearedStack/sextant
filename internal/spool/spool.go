@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -96,6 +97,16 @@ type Spool struct {
 	pendingDir    string
 	quarantineDir string
 	nextSeq       uint64
+	log           io.Writer       // fixed one-line JSON events; nil discards
+	stuck         map[string]bool // pending files that could not be read or quarantined
+}
+
+// SetLog sets where the spool writes its fixed event lines. Lines name an
+// event and a reason from a closed list; never a path, a name or content.
+func (s *Spool) SetLog(w io.Writer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.log = w
 }
 
 // Open prepares dir/pending and dir/quarantine, removes incomplete temp files
@@ -218,16 +229,23 @@ func (s *Spool) Pending() ([]*Entry, error) {
 	out := make([]*Entry, 0, len(names))
 	for _, name := range names {
 		full := filepath.Join(s.pendingDir, name)
+		if s.stuck[name] {
+			continue // already reported; left in place as evidence
+		}
 		raw, err := os.ReadFile(full)
 		if err != nil {
+			s.stick(name, "spool_read_failed", "read_failed")
 			continue
 		}
 		var e Entry
 		dec := json.NewDecoder(bytes.NewReader(raw))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&e); err != nil || e.Validate() != nil {
-			_ = os.Rename(full, filepath.Join(s.quarantineDir, name))
-			syncDir(s.quarantineDir)
+			if mvErr := s.moveToQuarantine(full, name); mvErr != nil {
+				s.stick(name, "spool_quarantine_failed", "move_failed")
+				continue
+			}
+			s.note("spool_quarantined", quarantineReason(raw, err))
 			syncDir(s.pendingDir)
 			continue
 		}
@@ -259,11 +277,9 @@ func (s *Spool) Quarantine(e *Entry) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	dst := filepath.Join(s.quarantineDir, filepath.Base(e.path))
-	if err := os.Rename(e.path, dst); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := s.moveToQuarantine(e.path, filepath.Base(e.path)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errors.New("spool: cannot quarantine entry")
 	}
-	syncDir(s.quarantineDir)
 	syncDir(s.pendingDir)
 	return nil
 }
@@ -295,6 +311,59 @@ func safeFileToken(s string) string {
 		return "lease"
 	}
 	return b.String()
+}
+
+// moveToQuarantine moves src into quarantine/ under name, or under dupN-name
+// for the first N that is free, so earlier evidence is never overwritten. The
+// caller holds s.mu.
+func (s *Spool) moveToQuarantine(src, name string) error {
+	dst := filepath.Join(s.quarantineDir, name)
+	for n := 1; ; n++ {
+		if _, err := os.Lstat(dst); errors.Is(err, os.ErrNotExist) {
+			break
+		} else if err != nil {
+			return err
+		}
+		dst = filepath.Join(s.quarantineDir, "dup"+strconv.Itoa(n)+"-"+name)
+	}
+	if err := os.Rename(src, dst); err != nil {
+		return err
+	}
+	syncDir(s.quarantineDir)
+	return nil
+}
+
+// quarantineReason names, from a closed list, why a pending file was refused.
+func quarantineReason(raw []byte, decodeErr error) string {
+	if decodeErr == nil {
+		return "failed_validation"
+	}
+	var top map[string]json.RawMessage
+	if json.Unmarshal(raw, &top) == nil {
+		if _, ok := top["record"]; ok {
+			return "legacy_record_format"
+		}
+	}
+	return "undecodable"
+}
+
+// note writes one fixed event line. Event and reason are constants chosen by
+// this package; no path, file name or content can reach the line.
+func (s *Spool) note(event, reason string) {
+	if s.log != nil {
+		_, _ = io.WriteString(s.log, `{"event":"`+event+`","reason":"`+reason+`"}`+"\n")
+	}
+}
+
+// stick reports a pending file the spool cannot deal with, once, and leaves
+// it in place: later passes skip it, so one bad file neither blocks the rest
+// nor makes every flush retry and log again. It is retried after a restart.
+func (s *Spool) stick(name, event, reason string) {
+	if s.stuck == nil {
+		s.stuck = map[string]bool{}
+	}
+	s.stuck[name] = true
+	s.note(event, reason)
 }
 
 func syncDir(path string) {

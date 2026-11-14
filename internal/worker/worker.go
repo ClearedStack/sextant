@@ -91,6 +91,7 @@ func New(cfg Config) (*Worker, error) {
 	if logOut == nil {
 		logOut = io.Discard
 	}
+	cfg.Spool.SetLog(logOut)
 	return &Worker{
 		muster:            cfg.Muster,
 		fetcher:           cfg.Fetcher,
