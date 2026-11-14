@@ -13,10 +13,10 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/clearedstack/sextant/internal/errcode"
-	"github.com/clearedstack/sextant/internal/markup"
-	"github.com/clearedstack/sextant/internal/observation"
-	"github.com/clearedstack/sextant/internal/subtool"
+	"github.com/ClearedStack/sextant/internal/errcode"
+	"github.com/ClearedStack/sextant/internal/markup"
+	"github.com/ClearedStack/sextant/internal/observation"
+	"github.com/ClearedStack/sextant/internal/subtool"
 )
 
 // Tool is the gov-portal sub-tool.

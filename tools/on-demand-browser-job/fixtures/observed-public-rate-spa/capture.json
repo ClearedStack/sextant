@@ -1,0 +1,10 @@
+{
+  "format": "sextant-browser-capture/v1",
+  "rendered_html": "<!DOCTYPE html><html><head><title>Escalation calculator</title></head><body>\n<h1>Escalation calculator</h1>\n<p>No account required. In the public domain. Free to use. FAR Part 16.</p>\n<form>\n  <input type=\"number\" name=\"base\" required>\n  <output>104.20</output>\n</form>\n</body></html>",
+  "network_requests": [
+    {
+      "method": "GET",
+      "url": "https://rates.example-agency.gov/main.js"
+    }
+  ]
+}

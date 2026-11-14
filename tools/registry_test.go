@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/clearedstack/sextant/internal/errcode"
-	"github.com/clearedstack/sextant/internal/observation"
-	"github.com/clearedstack/sextant/internal/subtool"
+	"github.com/ClearedStack/sextant/internal/errcode"
+	"github.com/ClearedStack/sextant/internal/observation"
+	"github.com/ClearedStack/sextant/internal/subtool"
 )
 
 // TestRegistryAgreesWithTheRepository checks every registered sub-tool is
@@ -33,8 +33,9 @@ func TestRegistryAgreesWithTheRepository(t *testing.T) {
 	for _, s := range component.SubTools {
 		named[s] = true
 	}
-	if len(reg.Names()) == 0 {
-		t.Fatal("the registry is empty")
+	if len(reg.Names()) != len(component.SubTools) {
+		t.Fatalf("registered %d sub-tools (%v), component.json names %d (%v)",
+			len(reg.Names()), reg.Names(), len(component.SubTools), component.SubTools)
 	}
 	for _, name := range reg.Names() {
 		if !named[name] {
@@ -53,7 +54,7 @@ func TestRegistryAgreesWithTheRepository(t *testing.T) {
 
 func TestRegistryFileIsChecked(t *testing.T) {
 	bad := map[string]string{
-		"unbuilt tool": "tools:\n  - name: agency-pdf\n    folder: tools/agency-pdf\n",
+		"unbuilt tool": "tools:\n  - name: unknown-subtool\n    folder: tools/unknown-subtool\n",
 		"repeated":     "tools:\n  - name: gov-portal\n    folder: tools/gov-portal\n  - name: gov-portal\n    folder: tools/gov-portal\n",
 		"wrong folder": "tools:\n  - name: gov-portal\n    folder: elsewhere\n",
 		"extra key":    "tools:\n  - name: gov-portal\n    folder: tools/gov-portal\n    fallback: yes\n",

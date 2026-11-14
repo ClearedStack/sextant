@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/clearedstack/sextant/internal/observation"
-	"github.com/clearedstack/sextant/internal/rulefile"
+	"github.com/ClearedStack/sextant/internal/observation"
+	"github.com/ClearedStack/sextant/internal/rulefile"
 )
 
 //go:embed match.yaml

@@ -4,3 +4,9 @@
 tools:
   - name: gov-portal
     folder: tools/gov-portal
+  - name: saas-marketing
+    folder: tools/saas-marketing
+  - name: agency-pdf
+    folder: tools/agency-pdf
+  - name: on-demand-browser-job
+    folder: tools/on-demand-browser-job

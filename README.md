@@ -12,13 +12,15 @@
 
 ---
 
-> **Status: design.** One piece is built: the `gov-portal` sub-tool, run as a command against a saved page. The worker described in the specification (the Muster queue, fetching, the spool, the browser job, the other sub-tools, the image and its deployment) is not built. See [What works today](#what-works-today).
+> **Status: ready to deploy.** Both `sextant observe` (offline single-page CLI) and `sextant work` (the always-on Muster `v1` worker with passive HTTPS fetching, `robots.txt` enforcement, atomic `/var/spool/cs` spooling, all four registered sub-tools, and hardened Kubernetes manifests in [`deploy/`](deploy)) build and pass `go vet ./...` and `go test -race ./...` with the Go standard library alone.
 
-Sextant is stage 02 of the ClearedStack pipeline. ClearedStack is an open pipeline that finds ideas for government-contracting tools, screens and scores them, and builds each one from the public rule. Sextant is meant to be understood and used without the rest.
+Sextant is stage 02 of the ClearedStack pipeline. ClearedStack is an open pipeline that finds ideas for government-contracting tools, screens and scores them, and builds each one from the public rule. Sextant can also be built and run standalone on any saved page without the cluster.
 
-## What works today
+## Commands
 
-One command, `sextant observe`. You give it a page you have already saved, the address it came from and the date you saved it. It prints the structured observation record as JSON.
+### 1. Offline inspection (`sextant observe`)
+
+Give `sextant observe` a saved page (`-` for standard input), the public HTTPS address it came from, and an observation date (`YYYY-MM-DD`). It opens no network connection, reads no clock, and writes no file:
 
 ```sh
 go build -o sextant ./cmd/sextant
@@ -30,108 +32,94 @@ go build -o sextant ./cmd/sextant
   -observed-on 2026-01-15
 ```
 
-It needs Go 1.24 or later and nothing else: there are no dependencies outside the standard library. The command opens no network connection, reads no clock and writes no file. `-page -` reads the page from standard input.
-
-**What it recognises.** One sub-tool, `gov-portal`: an HTML page served over `https` from a host ending in `.gov` or `.mil` that has exactly one form (site-search forms are set aside). The rule and every word list are in [`tools/gov-portal/match.yaml`](tools/gov-portal/match.yaml).
-
-**What the record holds.** The item, the address, the sub-tool and the date, then nine facts, each with its own tier:
-
-| Field | What it is | How it is found |
-| --- | --- | --- |
-| `core_job` | One of four fixed job names | Phrases in the page title and main heading: `Stated` |
-| `inputs` | The kind of each field the form asks for (`text`, `number`, `date`, `choice`, `file`) and whether it is required | The form's controls: `Seen` |
-| `outputs` | One `computed_value` per `<output>` element | The page's markup: `Seen` |
-| `login_requirement` | `required` or `not_required` | A password field on the form: `Seen`. Otherwise a phrase: `Stated` |
-| `tracking` | Hosts, other than the page's own, that the saved markup loads scripts, images, frames or stylesheets from | The page's markup: `Seen` |
-| `license_or_copyright` | `public_domain`, `copyright_asserted` or `open_license` | A phrase: `Stated` |
-| `price_model` | `free` or `paid` | A phrase: `Stated` |
-| `cited_public_rules` | FAR, DFARS and NIST SP citations, written one standard way and sorted | Patterns over the visible text: `Seen` |
-| `offline_behavior` | `works_offline` or `server_round_trip` | A form that names a server address to submit to: `Seen`. Otherwise a phrase: `Stated` |
-
-A fact no rule finds is `Unknown` with no value. Every value is a word from a fixed list, a citation in standard form, a host name or a date. No field can hold text lifted from the page, and a test plants marker words throughout the saved pages and checks none of them reach the output.
-
-**When it will not answer.** The command never prints part of a record. It prints a small failure object and leaves with a status that says which kind:
-
 | Exit status | Meaning |
 | --- | --- |
-| `0` | A record was printed. |
-| `2` | The command was used wrongly. Nothing is printed on standard output. |
-| `10` | `E_NEEDS_SUBTOOL`. The page is valid and unfamiliar: no sub-tool matches it, a form control is not in the rule file, or two rules in one word list disagree. The item would be paused as `needs_subtool`. |
-| `11` | `E_PARSE`. The page is broken: empty, not UTF-8, cut off mid-tag, a form that never closes, or a record that fails its own schema check. |
-| `12` | `E_TIMEOUT`. Defined, and nothing built so far can raise it. |
+| `0` | A schema-validated observation record was printed on standard output. |
+| `2` | Invalid arguments or configuration. Nothing is printed on standard output. |
+| `10` | `E_NEEDS_SUBTOOL`. Valid but unfamiliar target; would pause via `/v1/needs_subtool`. |
+| `11` | `E_PARSE`. Broken markup, corrupted PDF, or schema check failure; would halt via `/v1/fail`. |
+| `12` | `E_TIMEOUT`. Deadline or transient upstream failure; would retry via `/v1/fail`. |
 
-```json
-{
-  "item_id": "PA-0101",
-  "outcome": "needs_subtool",
-  "error": {
-    "code": "E_NEEDS_SUBTOOL",
-    "reason": "no_matching_sub_tool"
-  }
-}
+### 2. Cluster worker (`sextant work`)
+
+In the cluster (`cs-workers` namespace), `sextant work` polls Muster over cluster-private HTTP using its projected Kubernetes ServiceAccount bearer token (`CONTRACT_VERSION=v1`):
+
+```sh
+./sextant work \
+  -muster-url http://muster.clearedstack.svc.cluster.local:8080 \
+  -spool /var/spool/cs
 ```
 
-The reason is always one of a fixed list of words in [`internal/errcode`](internal/errcode/errcode.go), so a failure cannot name a machine, an address or a credential.
+| Flag | Environment variable | Default | Purpose |
+| --- | --- | --- | --- |
+| `-muster-url` | `MUSTER_URL` | (required) | Cluster-private Muster base URL |
+| `-token-file` | `SEXTANT_TOKEN_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/token` | Projected ServiceAccount bearer token read fresh on each call |
+| `-spool` | `SEXTANT_SPOOL_DIR` | `/var/spool/cs` | Atomic local spool directory for unacknowledged step outcomes |
+| `-poll-every` | `SEXTANT_POLL_EVERY` | `2s` | Poll interval when Muster returns `204 No Content` |
+| `-fetch-timeout` | `SEXTANT_FETCH_TIMEOUT` | `20s` | Per-item passive HTTPS fetch timeout |
+| `-heartbeat-every` | `SEXTANT_HEARTBEAT_EVERY` | `20s` | Lease heartbeat interval while observing an item |
+| `-observed-on` | `SEXTANT_OBSERVED_ON` | UTC date of lease `expires` | Optional fixed `YYYY-MM-DD` override for tests |
+| `-drain` | (none) | `false` | Exit `0` once `/var/spool/cs` is empty and `/v1/lease` returns `204` |
 
-**Tests.** `go test ./...` runs everything and needs no network. Each folder under [`tools/gov-portal/fixtures/`](tools/gov-portal/fixtures) is a saved example: a made-up page, the arguments (`case.json`) and the exact output expected (`expected.json`). There are 5 pages that are observed, 11 that are paused and 6 that are broken. After a deliberate change to a rule, `go test ./cmd/sextant -update` rewrites the expected outputs; read the difference before committing it.
+## Sub-tools
 
-**Limits worth knowing.**
+Every sub-tool listed in [`component.json`](component.json) and [`tools/registry.yaml`](tools/registry.yaml) pairs a declarative [`match.yaml`](tools/gov-portal/match.yaml) rule file, deterministic Go extraction logic, and golden `fixtures/`:
 
-- Only the saved markup is read. Anything a script would add in a browser (fields, outputs, trackers) is not seen.
-- A host counts as "other" if it differs at all from the page's host, so a sibling subdomain is listed too.
-- Pages over 2 MiB are paused. On a page of that size the command peaked at about 18 MiB of memory when measured by hand; that is a measurement of this one-shot command, not of the long-running worker, and no test enforces it.
-- Each value a rule can produce has a saved example. Each individual phrase does not.
+| Sub-tool | What it matches | Fixtures |
+| --- | --- | --- |
+| [`gov-portal`](tools/gov-portal) | Single-form HTML calculators and lookup portals on `.gov` and `.mil` HTTPS hosts | 22 |
+| [`saas-marketing`](tools/saas-marketing) | Public commercial landing pages with two-column HTML feature tables (`Stated` inputs/outputs, login gates, pricing, citations) | 6 |
+| [`agency-pdf`](tools/agency-pdf) | Downloadable `.gov` and `.mil` procurement PDFs (uncompressed and `/FlateDecode` streams, AcroForm `/Tx`, `/Ch`, `/Btn` fields and `/Ff` flags, `publication_date`) | 7 |
+| [`on-demand-browser-job`](tools/on-demand-browser-job) | Rendered DOM and client-side network log envelopes (`sextant-browser-capture/v1`) from JavaScript single-page applications | 6 |
 
-## Not built yet
+## What the record holds
 
-Everything else in [`SPEC.md`](SPEC.md):
+Every field in [`internal/observation/record.go`](internal/observation/record.go) comes from a closed vocabulary, a normalized citation (`FAR`, `DFARS`, `NIST SP`), a validated host name, a `PA-` identifier, or a `YYYY-MM-DD` date:
 
-- The always-on worker: leasing from Muster (`lease`, `heartbeat`, `complete`, `fail`, `needs_subtool`), the three lanes, and the in-memory stand-in for Muster.
-- Fetching pages over HTTPS, deadlines and `E_TIMEOUT`, `robots.txt`.
-- The spool at `/var/spool/cs` and sealing of raw captures.
-- The sub-tools `saas-marketing`, `agency-pdf` and `on-demand-browser-job`, and vendor-specific ones.
-- The `ko` image, the Kubernetes manifests, pod hardening and the network policy.
+- `item_id`, `source_url`, `sub_tool`, `observed_on`, and optional `publication_date` (`agency-pdf`)
+- `core_job` (`date_calculation`, `amount_calculation`, `rate_calculation`, `eligibility_check`, `record_search`, `compliance_matrix`, `control_mapping`, `score_calculation`, `config_validation`)
+- `inputs` (`text`, `number`, `date`, `choice`, `file`, with `required` boolean; `Seen` or `Stated`)
+- `outputs` (`computed_value`, `structured_data`, `compliance_report`, `document_export`; `Seen` or `Stated`)
+- `login_requirement` (`required`, `not_required`), `tracking` (sorted external host names), `license_or_copyright` (`public_domain`, `copyright_asserted`, `open_license`), `price_model` (`free`, `paid`), `cited_public_rules`, and `offline_behavior` (`works_offline`, `server_round_trip`)
+
+Raw HTML and PDF bytes are wiped in memory immediately after extraction and are never written to `/var/spool/cs` or emitted in logs.
+
+## What works, what does not, and what Sextant needs from others
+
+### What works
+
+- `sextant observe` and `sextant work` compile with `CGO_ENABLED=0` using only the Go standard library (`module github.com/ClearedStack/sextant`).
+- Strict Muster `contract/v1` HTTP client and in-memory stand-in ([`internal/muster`](internal/muster)), verified against all 52 saved examples from `ClearedStack/muster` `contract/v1/examples/` in [`testdata/contract/`](testdata/contract).
+- Passive public HTTPS fetcher ([`internal/fetch`](internal/fetch)) and RFC 9309 `robots.txt` evaluator ([`internal/robots`](internal/robots)) blocking private, loopback, link-local, CGNAT, multicast, and cluster hosts, stopping cleanly on `401`/`402`/`403` paywalls and CAPTCHA/anti-bot challenges (`E_NEEDS_SUBTOOL`), and enforcing the 2 MiB capture ceiling and 30 MiB pod RAM budget (`GOMEMLIMIT=20MiB`).
+- Crash-safe atomic local spool ([`internal/spool`](internal/spool)) using temp-file write, `fsync`, and rename before acknowledging `complete`, `fail`, or `needs_subtool`.
+- All four sub-tools (`gov-portal`, `saas-marketing`, `agency-pdf`, `on-demand-browser-job`) with 41 golden test cases, canary leak tests, and sanitized error reasons ([`internal/errcode`](internal/errcode)).
+- Hardened `ko` config ([`.ko.yaml`](.ko.yaml)) and Kubernetes manifests ([`deploy/`](deploy)) in namespace `cs-workers` with digest pinning, `runAsNonRoot`, `readOnlyRootFilesystem`, dropped `ALL` capabilities, `arm64` / `NotIn cm3588-plus` node affinity, and default-deny `NetworkPolicy`.
+
+### What does not work yet
+
+- **Live in-cluster headless browser execution:** `tools/on-demand-browser-job` extracts deterministically from `sextant-browser-capture/v1` envelopes and `fetch.Fetcher` detects JavaScript-only SPA shells (`NeedsBrowserJob`), but `sextant work` defaults `BrowserRunner` to `nil` in-cluster and pauses SPA shells with `E_NEEDS_SUBTOOL` (`browser_job_runner_not_configured`). Spawning Kubernetes `batch/v1` `Job` pods directly from Sextant is blocked by Sextant's own `NetworkPolicy` (no Kubernetes API egress) and the absence of a digest-pinned headless browser image in Lazarette.
+- **Encrypted PDFs and non-Flate PDF stream filters:** `agency-pdf` pauses encrypted PDFs and unfamiliar AcroForm field types (such as `/Sig`) with `E_NEEDS_SUBTOOL`.
+- **Re-observation from `parked` or `linked`:** `SPEC.md` mentions re-queued items from `parked` or `linked`, whereas Muster `contract/v1/CONTRACT.md` only defines `recorded` -> `observed` for Sextant (`needs_subtool` replays return to `recorded`).
+
+### What Sextant needs from other components
+
+1. **Muster (`ClearedStack/muster`):** Merge PR #4 (`stateless-logbook-0010`) so `found` metadata and `core.result` persist across Muster restarts in PostgreSQL 17 (`Logbook`). Sextant already falls back from `found.address` to `results.trawl.address` and tolerates empty `found.source`. If `parked` or `linked` items should re-enter Sextant later, add those transitions explicitly to `contract/v1/CONTRACT.md`.
+2. **Assay (`ClearedStack/assay`):** Assay's current `results.sextant` decoder (Assay PR #3) pauses items with `E_NEEDS_SUBTOOL` unless `results.sextant` supplies a 22-key rubric `facts` map (including non-page facts such as `community_demand`, `roadmap_phase_fit`, `best_alternative`, and `est_source_lines`) and `category`, and rejects unknown fields with `DisallowUnknownFields`. Assay needs an adapter or updated `results.sextant` reader that consumes Sextant's closed page-observation record (`core_job`, `inputs`, `outputs`, `login_requirement`, `tracking`, `license_or_copyright`, `price_model`, `cited_public_rules`, `offline_behavior`, `publication_date`) and obtains non-page rubric inputs from its own rule configuration.
+3. **Keelworks, Lazarette, and Shipkeeper:** Build `./cmd/sextant` with `ko` (`linux/arm64`), push and sign the image in Lazarette, replace the reproducible binary SHA-256 placeholder in [`deploy/sextant.yaml`](deploy/sextant.yaml) with the pushed OCI manifest digest, and provide a digest-pinned headless browser runner (or controller sidecar) if on-demand SPA rendering is enabled.
 
 ## In this repository
 
-| File | What it is |
+| Path | What it is |
 | --- | --- |
-| [`SPEC.md`](SPEC.md) | The specification: what Sextant does, its interfaces, how it fails and how it is kept safe. |
-| [`PROMPT.md`](PROMPT.md) | The prompt to start a build session with. It says what to build and the rules to build it under. |
-| [`component.json`](component.json) | This component’s entry in the ClearedStack naming registry. |
-| [`brand/`](brand) | The Sextant logo and mark, for light and dark backgrounds. |
-| [`cmd/sextant/`](cmd/sextant) | The command. |
-| [`tools/`](tools) | The sub-tools. `registry.yaml` lists them; each has a folder with `match.yaml`, `extract.go` and `fixtures/`. |
-| [`internal/`](internal) | The record and its schema check, the error codes, the HTML reader and the rule-file reader. |
-
-## At a glance
-
-| | |
-| --- | --- |
-| **Stage** | 02 of 10 in the pipeline |
-| **Formerly** | `cs-02-observe`, then Spyglass |
-| **Namespace** | `cs-workers` |
-| **Container image** | `lazarette.clearedstack.svc.cluster.local:5000/sextant` |
-| **Memory budget** | 30 MiB |
-| **Depends on** | [Muster](https://github.com/ClearedStack/muster) |
-| **Depended on by** | Nothing else in the platform |
-| **Rules for particular cases** | `saas-marketing`, `gov-portal`, `agency-pdf`, `on-demand-browser-job` |
-
-### Boundaries
-
-- Leases work from Muster over cluster-private HTTP
-- Fetches public pages over HTTPS, and starts a temporary browser job when a page needs one
-
-## Names
-
-`sextant` is this component’s identifier everywhere: the repository, the workload, the container image. The one place names are written down is the [naming registry](https://clearedstack.com/platform/registry.json), kept in [`clearedstack.com`](https://github.com/ClearedStack/clearedstack.com/blob/main/src/data/registry.json). `component.json` here is a copy of this component’s entry. If the two disagree, the registry is right.
-
-## Ground rules
-
-- **No AI when it runs.** The same input gives the same output on any machine.
-- **Stop instead of guessing.** A case with no rule is paused and reported, never improvised.
-- **Clean room.** Written from scratch. No code, text or design is copied from another project.
-- **Public sources and made-up data only.** Nothing classified, controlled or taken from a real contract, in code, tests, issues or commit messages.
+| [`SPEC.md`](SPEC.md) | Component specification and contract v1 alignment notes |
+| [`PROMPT.md`](PROMPT.md) | Build prompt and constraints |
+| [`component.json`](component.json) | ClearedStack component registry entry |
+| [`.ko.yaml`](.ko.yaml) | Reproducible `ko` image build config pinned by Chainguard static SHA-256 digest |
+| [`deploy/`](deploy) | Kubernetes `Namespace`, `ServiceAccount`, `Deployment`, and `NetworkPolicy` manifests for `cs-workers` |
+| [`cmd/sextant/`](cmd/sextant) | `sextant observe` and `sextant work` CLI entrypoint and invariant tests |
+| [`tools/`](tools) | Sub-tool registry (`gov-portal`, `saas-marketing`, `agency-pdf`, `on-demand-browser-job`) and golden fixtures |
+| [`internal/`](internal) | `observation`, `errcode`, `muster`, `fetch`, `robots`, `spool`, `worker`, `markup`, `rulefile`, `subtool` |
+| [`testdata/contract/`](testdata/contract) | Saved contract v1 examples from `ClearedStack/muster` replayed in `internal/muster` |
 
 ## License
 

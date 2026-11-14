@@ -1,3 +1,3 @@
-module github.com/clearedstack/sextant
+module github.com/ClearedStack/sextant
 
 go 1.24

@@ -1,0 +1,21 @@
+# Sextant's container image is built straight from source with ko.
+# There is no Dockerfile.
+#
+#   KO_DOCKER_REPO=lazarette.clearedstack.svc.cluster.local:5000 \
+#     ko build --platform=linux/arm64 --base-import-paths ./cmd/sextant
+#
+# The base image holds no shell and no package manager, includes CA
+# certificates for outbound HTTPS, and runs as user 65532 (nonroot).
+defaultBaseImage: cgr.dev/chainguard/static@sha256:17367e4d3ae2b46c3290858e483fac09be085c92b372360fe3bf6a6150848fde
+
+builds:
+  - id: sextant
+    main: ./cmd/sextant
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w
+      - -buildid=

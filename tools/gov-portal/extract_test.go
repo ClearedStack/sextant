@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/clearedstack/sextant/internal/observation"
+	"github.com/ClearedStack/sextant/internal/observation"
 )
 
 func loaded(t *testing.T) *rules {

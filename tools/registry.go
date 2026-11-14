@@ -9,11 +9,14 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/clearedstack/sextant/internal/errcode"
-	"github.com/clearedstack/sextant/internal/observation"
-	"github.com/clearedstack/sextant/internal/rulefile"
-	"github.com/clearedstack/sextant/internal/subtool"
-	govportal "github.com/clearedstack/sextant/tools/gov-portal"
+	"github.com/ClearedStack/sextant/internal/errcode"
+	"github.com/ClearedStack/sextant/internal/observation"
+	"github.com/ClearedStack/sextant/internal/rulefile"
+	"github.com/ClearedStack/sextant/internal/subtool"
+	agencypdf "github.com/ClearedStack/sextant/tools/agency-pdf"
+	govportal "github.com/ClearedStack/sextant/tools/gov-portal"
+	browserjob "github.com/ClearedStack/sextant/tools/on-demand-browser-job"
+	saasmarketing "github.com/ClearedStack/sextant/tools/saas-marketing"
 )
 
 //go:embed registry.yaml
@@ -22,7 +25,10 @@ var registryYAML []byte
 // built maps a registry name to the code that implements it. A name in
 // registry.yaml with no entry here fails loading.
 var built = map[string]func() (subtool.Tool, error){
-	govportal.Name: govportal.New,
+	agencypdf.Name:     agencypdf.New,
+	govportal.Name:     govportal.New,
+	browserjob.Name:    browserjob.New,
+	saasmarketing.Name: saasmarketing.New,
 }
 
 // Registry is the loaded list of sub-tools, in registry order.

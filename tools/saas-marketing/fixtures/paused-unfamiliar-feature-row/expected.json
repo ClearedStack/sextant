@@ -1,0 +1,8 @@
+{
+  "item_id": "PA-0204",
+  "outcome": "needs_subtool",
+  "error": {
+    "code": "E_NEEDS_SUBTOOL",
+    "reason": "unfamiliar_feature_table_row"
+  }
+}

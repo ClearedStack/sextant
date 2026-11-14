@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/clearedstack/sextant/internal/errcode"
+	"github.com/ClearedStack/sextant/internal/errcode"
 )
 
 func TestTokenize(t *testing.T) {

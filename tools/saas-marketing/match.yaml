@@ -1,0 +1,171 @@
+# saas-marketing: public vendor landing pages and feature tables.
+#
+# Values on the right-hand side of "value:" and "kind:" must come from the
+# closed vocabularies in internal/observation; loading fails otherwise.
+tool: saas-marketing
+
+match:
+  schemes:
+    - https
+  exclude_host_suffixes:
+    - .gov
+    - .mil
+
+# Feature table extraction rules. Each two-cell row whose first cell matches
+# input_labels or output_labels must map its second cell to a known input or
+# output kind; otherwise the item pauses with E_NEEDS_SUBTOOL.
+feature_table:
+  header_tags:
+    - th
+  input_labels:
+    - input
+    - inputs
+    - required input
+    - optional input
+  required_markers:
+    - required
+    - mandatory
+  output_labels:
+    - output
+    - outputs
+    - deliverable
+    - export
+  stated_inputs:
+    - kind: file
+      phrases:
+        - solicitation pdf
+        - spreadsheet upload
+        - document upload
+        - file upload
+    - kind: text
+      phrases:
+        - clause text
+        - contract number
+        - keyword query
+        - plain text
+    - kind: number
+      phrases:
+        - labor hours
+        - hourly rate
+        - headcount
+        - numeric value
+    - kind: date
+      phrases:
+        - award date
+        - period start date
+        - calendar date
+    - kind: choice
+      phrases:
+        - contract type selector
+        - agency dropdown
+        - set-aside selection
+  stated_outputs:
+    - kind: computed_value
+      phrases:
+        - burdened rate
+        - readiness score
+        - calculated total
+    - kind: structured_data
+      phrases:
+        - csv schedule
+        - json export
+        - structured table
+    - kind: compliance_report
+      phrases:
+        - compliance matrix
+        - gap assessment
+    - kind: document_export
+      phrases:
+        - downloadable report
+        - formatted worksheet
+
+login_gates:
+  credential_controls:
+    - input:password
+  auth_action_prefixes:
+    - /login
+    - /signin
+    - /sso
+
+core_job:
+  - value: compliance_matrix
+    phrases:
+      - compliance matrix builder
+      - rfp compliance matrix
+      - solicitation matrix
+  - value: rate_calculation
+    phrases:
+      - wrap rate calculator
+      - labor rate calculator
+      - indirect rate calculator
+  - value: score_calculation
+    phrases:
+      - sprs score calculator
+      - assessment score calculator
+
+login_requirement:
+  - value: required
+    phrases:
+      - start your free trial
+      - sign in to your workspace
+      - account required
+      - book a demo to access
+  - value: not_required
+    phrases:
+      - no signup required
+      - no account required
+      - try in browser without login
+
+license_or_copyright:
+  - value: copyright_asserted
+    phrases:
+      - all rights reserved
+      - proprietary software
+      - ©
+  - value: open_license
+    phrases:
+      - mit license
+      - apache 2.0 license
+  - value: public_domain
+    phrases:
+      - dedicated to the public domain
+      - cc0 public domain
+
+price_model:
+  - value: paid
+    phrases:
+      - per-seat subscription
+      - billed annually
+      - enterprise pricing
+      - per user per month
+  - value: free
+    phrases:
+      - free forever
+      - completely free
+      - $0 for all users
+
+offline_behavior:
+  - value: server_round_trip
+    phrases:
+      - cloud-hosted workspace
+      - processed in our secure cloud
+      - synced to our servers
+  - value: works_offline
+    phrases:
+      - runs locally in your browser
+      - works offline
+      - zero server uploads
+
+citations:
+  - family: FAR
+    pattern: '\bFAR\s+(?:[Cc]lause\s+)?(\d{1,2}\.\d{3,4}(?:-\d{1,4})?)\b'
+    write: 'FAR $1'
+  - family: FAR
+    pattern: '\bFAR\s+Part\s+(\d{1,2})\b'
+    write: 'FAR Part $1'
+  - family: DFARS
+    pattern: '\bDFARS\s+(?:[Cc]lause\s+)?(2\d{2}\.\d{3,4}(?:-\d{4})?)\b'
+    write: 'DFARS $1'
+  - family: NIST
+    pattern: '\bNIST\s+(?:SP|Special Publication)\s+(800-\d{1,3}[A-Z]?)\b'
+    write: 'NIST SP $1'

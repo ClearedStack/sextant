@@ -10,7 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/clearedstack/sextant/internal/errcode"
+	"github.com/ClearedStack/sextant/internal/errcode"
 )
 
 // Kind says what a Token is.

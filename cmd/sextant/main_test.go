@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
-	"github.com/clearedstack/sextant/internal/subtool"
+	"github.com/ClearedStack/sextant/internal/muster"
+	"github.com/ClearedStack/sextant/internal/subtool"
 )
 
 var update = flag.Bool("update", false, "rewrite every fixture's expected.json from the current output")
@@ -64,7 +66,8 @@ func observe(t *testing.T, args []string, stdin string) (stdout, stderr string, 
 // must print exactly the saved output and leave with the saved exit status.
 func TestFixtures(t *testing.T) {
 	for _, f := range fixtures(t) {
-		t.Run(filepath.Base(f.dir), func(t *testing.T) {
+		toolName := filepath.Base(filepath.Dir(filepath.Dir(f.dir)))
+		t.Run(toolName+"/"+filepath.Base(f.dir), func(t *testing.T) {
 			got, stderr, status := observe(t, f.args(), "")
 			if stderr != "" {
 				t.Errorf("unexpected text on standard error: %q", stderr)
@@ -143,7 +146,7 @@ func TestNothingFromThePageLeaks(t *testing.T) {
 // TestFailuresAreSanitized checks the shape of every failure: one of the
 // three codes, a reason that is a fixed lower-case word, and nothing else.
 func TestFailuresAreSanitized(t *testing.T) {
-	shape := regexp.MustCompile(`^\{\n  "item_id": "PA-[0-9A-Z]{4}",\n  "outcome": "(needs_subtool|fail)",\n  "error": \{\n    "code": "(E_NEEDS_SUBTOOL|E_PARSE|E_TIMEOUT)",\n    "reason": "[a-z0-9_]+"\n  \}\n\}\n$`)
+	shape := regexp.MustCompile(`^\{\n  "item_id": "PA-([0-9]{4}|[1-9][0-9]{4,8})",\n  "outcome": "(needs_subtool|fail)",\n  "error": \{\n    "code": "(E_NEEDS_SUBTOOL|E_PARSE|E_TIMEOUT)",\n    "reason": "[a-z0-9_]+"\n  \}\n\}\n$`)
 	failures := 0
 	for _, f := range fixtures(t) {
 		out, _, status := observe(t, f.args(), "")
@@ -205,5 +208,55 @@ func TestUsageErrors(t *testing.T) {
 				t.Errorf("%s: the message repeats %q", name, banned)
 			}
 		}
+	}
+}
+
+func TestWorkCommand(t *testing.T) {
+	hubSrv := httptest.NewServer(muster.NewStandIn())
+	defer hubSrv.Close()
+
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("sextant\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spoolDir := t.TempDir()
+
+	t.Setenv("CONTRACT_VERSION", "v1")
+	out, stderr, status := observe(t, []string{
+		"work",
+		"-muster-url", hubSrv.URL,
+		"-token-file", tokenFile,
+		"-spool", spoolDir,
+		"-poll-every", "10ms",
+		"-drain",
+	}, "")
+	if status != exitOK || out != "" || !strings.Contains(stderr, `"event":"worker_stopped"`) {
+		t.Fatalf("work -drain: status=%d stdout=%q stderr=%q", status, out, stderr)
+	}
+
+	// Unknown contract version must fail closed with exitUsage.
+	t.Setenv("CONTRACT_VERSION", "v2")
+	_, stderr, status = observe(t, []string{
+		"work",
+		"-muster-url", hubSrv.URL,
+		"-token-file", tokenFile,
+		"-spool", spoolDir,
+		"-drain",
+	}, "")
+	if status != exitUsage || stderr == "" {
+		t.Fatalf("expected CONTRACT_VERSION=v2 to fail with exitUsage, got status=%d stderr=%q", status, stderr)
+	}
+
+	// Credentials in -muster-url must be rejected without echoing them.
+	t.Setenv("CONTRACT_VERSION", "v1")
+	_, stderr, status = observe(t, []string{
+		"work",
+		"-muster-url", "http://user:hunter2-secret@muster.clearedstack.svc.cluster.local:8080",
+		"-token-file", tokenFile,
+		"-spool", spoolDir,
+		"-drain",
+	}, "")
+	if status != exitUsage || strings.Contains(stderr, "hunter2-secret") {
+		t.Fatalf("expected sanitized credential error, got status=%d stderr=%q", status, stderr)
 	}
 }

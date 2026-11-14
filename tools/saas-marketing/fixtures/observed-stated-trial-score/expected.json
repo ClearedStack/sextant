@@ -1,0 +1,53 @@
+{
+  "item_id": "PA-0203",
+  "source_url": "https://cyber.example-vendor.net/sprs",
+  "sub_tool": "saas-marketing",
+  "observed_on": "2026-01-15",
+  "core_job": {
+    "value": "score_calculation",
+    "tier": "Stated"
+  },
+  "inputs": {
+    "fields": [
+      {
+        "kind": "choice",
+        "required": true
+      }
+    ],
+    "tier": "Stated"
+  },
+  "outputs": {
+    "fields": [
+      {
+        "kind": "computed_value"
+      }
+    ],
+    "tier": "Stated"
+  },
+  "login_requirement": {
+    "value": "required",
+    "tier": "Stated"
+  },
+  "tracking": {
+    "external_hosts": [],
+    "tier": "Seen"
+  },
+  "license_or_copyright": {
+    "value": "public_domain",
+    "tier": "Stated"
+  },
+  "price_model": {
+    "value": "free",
+    "tier": "Stated"
+  },
+  "cited_public_rules": {
+    "citations": [
+      "NIST SP 800-171"
+    ],
+    "tier": "Seen"
+  },
+  "offline_behavior": {
+    "value": "works_offline",
+    "tier": "Stated"
+  }
+}

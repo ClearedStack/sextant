@@ -26,12 +26,25 @@ const (
 	Unknown Tier = "Unknown"
 )
 
+// MaxAddressBytes is the longest address Muster and Logbook accept.
+const MaxAddressBytes = 2000
+
 // Closed vocabularies. A sub-tool's rule file may only produce these values.
 var (
-	CoreJobs = set("date_calculation", "amount_calculation", "eligibility_check", "record_search")
+	CoreJobs = set(
+		"date_calculation",
+		"amount_calculation",
+		"rate_calculation",
+		"eligibility_check",
+		"record_search",
+		"compliance_matrix",
+		"control_mapping",
+		"score_calculation",
+		"config_validation",
+	)
 	// InputKinds and OutputKinds describe the shape of a field, never its label.
 	InputKinds        = set("text", "number", "date", "choice", "file")
-	OutputKinds       = set("computed_value")
+	OutputKinds       = set("computed_value", "structured_data", "compliance_report", "document_export")
 	LoginRequirements = set("required", "not_required")
 	Licenses          = set("public_domain", "copyright_asserted", "open_license")
 	PriceModels       = set("free", "paid")
@@ -94,6 +107,7 @@ type Record struct {
 	SourceURL          string     `json:"source_url"`
 	SubTool            string     `json:"sub_tool"`
 	ObservedOn         string     `json:"observed_on"`
+	PublicationDate    *Fact      `json:"publication_date,omitempty"`
 	CoreJob            Fact       `json:"core_job"`
 	Inputs             Inputs     `json:"inputs"`
 	Outputs            Outputs    `json:"outputs"`
@@ -106,13 +120,13 @@ type Record struct {
 }
 
 var (
-	itemIDPattern   = regexp.MustCompile(`^PA-[0-9A-Z]{4}$`)
+	itemIDPattern   = regexp.MustCompile(`^PA-([0-9]{4}|[1-9][0-9]{4,8})$`)
 	subToolPattern  = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	hostPattern     = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$`)
 	citationPattern = regexp.MustCompile(`^[A-Z]+ [A-Za-z0-9][A-Za-z0-9 .-]*$`)
 )
 
-// ValidItemID reports whether s has the PA-XXXX shape.
+// ValidItemID reports whether s matches Muster and Logbook's item ID pattern.
 func ValidItemID(s string) bool { return itemIDPattern.MatchString(s) }
 
 // ValidDate reports whether s is a calendar date written YYYY-MM-DD.
@@ -121,12 +135,25 @@ func ValidDate(s string) bool {
 	return err == nil && t.Format("2006-01-02") == s
 }
 
+func hasWhiteSpace(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case ' ', '\t', '\n', '\r', '\v', '\f':
+			return true
+		}
+	}
+	return false
+}
+
 // Validate checks a record against the schema. It returns nil or a plain
 // description of the first problem; the description names fields, never page
 // content.
 func (r *Record) Validate() error {
 	if !ValidItemID(r.ItemID) {
-		return errors.New("item_id is not PA-XXXX")
+		return errors.New("item_id is not a valid PA identifier")
+	}
+	if len(r.SourceURL) == 0 || len(r.SourceURL) > MaxAddressBytes || hasWhiteSpace(r.SourceURL) {
+		return errors.New("source_url exceeds address bounds or contains white space")
 	}
 	u, err := url.Parse(r.SourceURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Fragment != "" {
@@ -137,6 +164,11 @@ func (r *Record) Validate() error {
 	}
 	if !ValidDate(r.ObservedOn) {
 		return errors.New("observed_on is not YYYY-MM-DD")
+	}
+	if r.PublicationDate != nil {
+		if err := checkDateFact("publication_date", *r.PublicationDate); err != nil {
+			return err
+		}
 	}
 	facts := []struct {
 		name  string
@@ -154,7 +186,7 @@ func (r *Record) Validate() error {
 			return err
 		}
 	}
-	if err := checkList("inputs", len(r.Inputs.Fields), r.Inputs.Fields == nil, r.Inputs.Tier); err != nil {
+	if err := checkFieldList("inputs", len(r.Inputs.Fields), r.Inputs.Fields == nil, r.Inputs.Tier); err != nil {
 		return err
 	}
 	for _, in := range r.Inputs.Fields {
@@ -162,7 +194,7 @@ func (r *Record) Validate() error {
 			return errors.New("inputs holds a kind outside the vocabulary")
 		}
 	}
-	if err := checkList("outputs", len(r.Outputs.Fields), r.Outputs.Fields == nil, r.Outputs.Tier); err != nil {
+	if err := checkFieldList("outputs", len(r.Outputs.Fields), r.Outputs.Fields == nil, r.Outputs.Tier); err != nil {
 		return err
 	}
 	for _, out := range r.Outputs.Fields {
@@ -192,7 +224,7 @@ func (r *Record) Validate() error {
 			return errors.New("tracking.external_hosts holds something that is not a host name")
 		}
 	}
-	if err := checkList("cited_public_rules", len(r.CitedPublicRules.Citations), r.CitedPublicRules.Citations == nil, r.CitedPublicRules.Tier); err != nil {
+	if err := checkSeenList("cited_public_rules", len(r.CitedPublicRules.Citations), r.CitedPublicRules.Citations == nil, r.CitedPublicRules.Tier); err != nil {
 		return err
 	}
 	if !sortedUnique(r.CitedPublicRules.Citations) {
@@ -222,9 +254,38 @@ func checkFact(name string, f Fact, vocab map[string]bool) error {
 	return nil
 }
 
-// checkList enforces: a list is never null; it is empty exactly when Unknown;
-// a non-empty list is Seen.
-func checkList(name string, n int, isNil bool, tier Tier) error {
+func checkDateFact(name string, f Fact) error {
+	switch f.Tier {
+	case Unknown:
+		if f.Value != nil {
+			return fmt.Errorf("%s is Unknown but has a value", name)
+		}
+	case Seen, Stated:
+		if f.Value == nil || !ValidDate(*f.Value) {
+			return fmt.Errorf("%s is not YYYY-MM-DD", name)
+		}
+	default:
+		return fmt.Errorf("%s has a tier that does not exist", name)
+	}
+	return nil
+}
+
+// checkFieldList enforces: a field list is never null; it is empty exactly when
+// Unknown; a non-empty field list is Seen (live controls) or Stated (feature table).
+func checkFieldList(name string, n int, isNil bool, tier Tier) error {
+	if isNil {
+		return fmt.Errorf("%s list is missing", name)
+	}
+	switch {
+	case tier == Unknown && n == 0, (tier == Seen || tier == Stated) && n > 0:
+		return nil
+	}
+	return fmt.Errorf("%s tier does not agree with its list", name)
+}
+
+// checkSeenList enforces: a list is never null; it is empty exactly when
+// Unknown; a non-empty list is Seen.
+func checkSeenList(name string, n int, isNil bool, tier Tier) error {
 	if isNil {
 		return fmt.Errorf("%s list is missing", name)
 	}

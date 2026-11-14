@@ -1,0 +1,53 @@
+{
+  "item_id": "PA-0302",
+  "source_url": "https://acq.example-command.mil/size-checklist.pdf",
+  "sub_tool": "agency-pdf",
+  "observed_on": "2026-01-15",
+  "publication_date": {
+    "value": "2025-11-20",
+    "tier": "Stated"
+  },
+  "core_job": {
+    "value": "eligibility_check",
+    "tier": "Stated"
+  },
+  "inputs": {
+    "fields": [
+      {
+        "kind": "choice",
+        "required": true
+      }
+    ],
+    "tier": "Seen"
+  },
+  "outputs": {
+    "fields": [],
+    "tier": "Unknown"
+  },
+  "login_requirement": {
+    "value": "required",
+    "tier": "Stated"
+  },
+  "tracking": {
+    "external_hosts": [],
+    "tier": "Seen"
+  },
+  "license_or_copyright": {
+    "value": "open_license",
+    "tier": "Stated"
+  },
+  "price_model": {
+    "value": "free",
+    "tier": "Stated"
+  },
+  "cited_public_rules": {
+    "citations": [
+      "FAR 52.219-1"
+    ],
+    "tier": "Seen"
+  },
+  "offline_behavior": {
+    "value": "server_round_trip",
+    "tier": "Stated"
+  }
+}

@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/clearedstack/sextant/internal/observation"
+	"github.com/ClearedStack/sextant/internal/observation"
 )
 
 // MaxPageBytes is the largest page Sextant will read. It keeps one
