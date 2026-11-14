@@ -74,6 +74,8 @@ Every sub-tool listed in [`component.json`](component.json) and [`tools/registry
 
 ## What the record holds
 
+This is the internal observation record (`sextant observe` prints it). `sextant work` does not send it: it derives the four-key `results.sextant` Assay reads (`category`, `sub_tool`, `observed_on`, `facts`) from it, using the citation and template tables in [`internal/derive`](internal/derive). See `SPEC.md`, "Proposed changes", item 2.
+
 Every field in [`internal/observation/record.go`](internal/observation/record.go) comes from a closed vocabulary, a normalized citation (`FAR`, `DFARS`, `NIST SP`), a validated host name, a `PA-` identifier, or a `YYYY-MM-DD` date:
 
 - `item_id`, `source_url`, `sub_tool`, `observed_on`, and optional `publication_date` (`agency-pdf`)
@@ -104,7 +106,7 @@ Raw HTML and PDF bytes are wiped in memory immediately after extraction and are 
 ### What Sextant needs from other components
 
 1. **Muster (`ClearedStack/muster`):** Merge PR #4 (`stateless-logbook-0010`) so `found` metadata and `core.result` persist across Muster restarts in PostgreSQL 17 (`Logbook`). Sextant already falls back from `found.address` to `results.trawl.address` and tolerates empty `found.source`. If `parked` or `linked` items should re-enter Sextant later, add those transitions explicitly to `contract/v1/CONTRACT.md`.
-2. **Assay (`ClearedStack/assay`):** Assay's current `results.sextant` decoder (Assay PR #3) pauses items with `E_NEEDS_SUBTOOL` unless `results.sextant` supplies a 22-key rubric `facts` map (including non-page facts such as `community_demand`, `roadmap_phase_fit`, `best_alternative`, and `est_source_lines`) and `category`, and rejects unknown fields with `DisallowUnknownFields`. Assay needs an adapter or updated `results.sextant` reader that consumes Sextant's closed page-observation record (`core_job`, `inputs`, `outputs`, `login_requirement`, `tracking`, `license_or_copyright`, `price_model`, `cited_public_rules`, `offline_behavior`, `publication_date`) and obtains non-page rubric inputs from its own rule configuration.
+2. **Assay (`ClearedStack/assay`):** `results.sextant` now has the four keys and 22 pricing facts Assay's decoder reads. Assay must accept the `Designed` tier (its own PR) before the build facts parse, and its `private_by_design` gate must accept `Designed` for `emits_tracking` and `connect_src_self` or items pause there.
 3. **Keelworks, Lazarette, and Shipkeeper:** Build `./cmd/sextant` with `ko` (`linux/arm64`), push and sign the image in Lazarette, replace the reproducible binary SHA-256 placeholder in [`deploy/sextant.yaml`](deploy/sextant.yaml) with the pushed OCI manifest digest, and provide a digest-pinned headless browser runner (or controller sidecar) if on-demand SPA rendering is enabled.
 
 ## In this repository
@@ -118,7 +120,7 @@ Raw HTML and PDF bytes are wiped in memory immediately after extraction and are 
 | [`deploy/`](deploy) | Kubernetes `Namespace`, `ServiceAccount`, `Deployment`, and `NetworkPolicy` manifests for `cs-workers` |
 | [`cmd/sextant/`](cmd/sextant) | `sextant observe` and `sextant work` CLI entrypoint and invariant tests |
 | [`tools/`](tools) | Sub-tool registry (`gov-portal`, `saas-marketing`, `agency-pdf`, `on-demand-browser-job`) and golden fixtures |
-| [`internal/`](internal) | `observation`, `errcode`, `muster`, `fetch`, `robots`, `spool`, `worker`, `markup`, `rulefile`, `subtool` |
+| [`internal/`](internal) | `observation`, `derive`, `errcode`, `muster`, `fetch`, `robots`, `spool`, `worker`, `markup`, `rulefile`, `subtool` |
 | [`testdata/contract/`](testdata/contract) | Saved contract v1 examples from `ClearedStack/muster` replayed in `internal/muster` |
 
 ## License
