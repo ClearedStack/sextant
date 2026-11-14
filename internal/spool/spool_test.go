@@ -5,26 +5,32 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ClearedStack/sextant/internal/derive"
 	"github.com/ClearedStack/sextant/internal/errcode"
 	"github.com/ClearedStack/sextant/internal/observation"
 )
 
-func sampleValidRecord() *observation.Record {
-	return &observation.Record{
+func sampleValidRecord() *derive.Result {
+	rec := &observation.Record{
 		ItemID:             "PA-0001",
 		SourceURL:          "https://calc.example.gov/tool",
 		SubTool:            "gov-portal",
 		ObservedOn:         "2026-01-05",
-		CoreJob:            observation.Known("date_calculation", observation.Seen),
-		Inputs:             observation.Inputs{Fields: []observation.InputField{{Kind: "date", Required: true}}, Tier: observation.Seen},
+		CoreJob:            observation.Known("rate_calculation", observation.Seen),
+		Inputs:             observation.Inputs{Fields: []observation.InputField{{Kind: "number", Required: true}}, Tier: observation.Seen},
 		Outputs:            observation.Outputs{Fields: []observation.OutputField{{Kind: "computed_value"}}, Tier: observation.Seen},
 		LoginRequirement:   observation.Known("not_required", observation.Seen),
 		Tracking:           observation.Tracking{ExternalHosts: []string{}, Tier: observation.Seen},
 		LicenseOrCopyright: observation.Known("public_domain", observation.Seen),
 		PriceModel:         observation.Known("free", observation.Seen),
-		CitedPublicRules:   observation.CitedRules{Citations: []string{}, Tier: observation.Unknown},
-		OfflineBehavior:    observation.Known("server_round_trip", observation.Seen),
+		CitedPublicRules:   observation.CitedRules{Citations: []string{"FAR 31.203"}, Tier: observation.Seen},
+		OfflineBehavior:    observation.Known("works_offline", observation.Seen),
 	}
+	res, err := derive.Default().Derive(rec)
+	if err != nil {
+		panic(err)
+	}
+	return res
 }
 
 func TestSpoolStageRestartAndQuarantine(t *testing.T) {
@@ -53,7 +59,7 @@ func TestSpoolStageRestartAndQuarantine(t *testing.T) {
 		ItemID:  "PA-0001",
 		Outcome: OutcomeComplete,
 		State:   "observed",
-		Record:  sampleValidRecord(),
+		Result:  sampleValidRecord(),
 	})
 	if err != nil {
 		t.Fatalf("Stage complete: %v", err)
@@ -136,12 +142,12 @@ func TestSpoolRejectsUnsanitizedOrInvalidEntries(t *testing.T) {
 	}
 
 	badRec := sampleValidRecord()
-	badRec.CoreJob = observation.Known("copied vendor marketing phrase", observation.Seen)
+	badRec.Facts["core_job"] = derive.Fact{Tier: derive.Seen, Value: []byte(`"copied vendor marketing phrase"`)}
 
 	cases := []Entry{
 		{Lease: "", ItemID: "PA-0001", Outcome: OutcomeNeedsSubtool, Code: errcode.NeedsSubtool, Reason: errcode.NoMatchingSubTool},
-		{Lease: "PA-0001.1.1", ItemID: "PA-0001", Outcome: OutcomeComplete, State: "scored", Record: sampleValidRecord()},
-		{Lease: "PA-0001.1.1", ItemID: "PA-0001", Outcome: OutcomeComplete, State: "observed", Record: badRec},
+		{Lease: "PA-0001.1.1", ItemID: "PA-0001", Outcome: OutcomeComplete, State: "scored", Result: sampleValidRecord()},
+		{Lease: "PA-0001.1.1", ItemID: "PA-0001", Outcome: OutcomeComplete, State: "observed", Result: badRec},
 		{Lease: "PA-0001.1.1", ItemID: "PA-0001", Outcome: OutcomeFail, Code: errcode.NeedsSubtool, Reason: errcode.NoMatchingSubTool},
 		{Lease: "PA-0001.1.1", ItemID: "PA-0001", Outcome: OutcomeNeedsSubtool, State: "observed", Code: errcode.NeedsSubtool, Reason: errcode.NoMatchingSubTool},
 	}

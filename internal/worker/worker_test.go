@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ClearedStack/sextant/internal/derive"
 	"github.com/ClearedStack/sextant/internal/errcode"
 	"github.com/ClearedStack/sextant/internal/fetch"
 	"github.com/ClearedStack/sextant/internal/muster"
-	"github.com/ClearedStack/sextant/internal/observation"
 	"github.com/ClearedStack/sextant/internal/spool"
 	"github.com/ClearedStack/sextant/tools"
 	browserjob "github.com/ClearedStack/sextant/tools/on-demand-browser-job"
@@ -61,6 +61,18 @@ func newTestFetcher(t *testing.T, targetSrv *httptest.Server, browser fetch.Brow
 	})
 }
 
+// testTables cites the saved pages' own citations, so that the saved pages
+// reach "observed". The default tables hold FAR Part 31 only.
+func testTables() derive.Tables {
+	tables := derive.Default()
+	row := tables.Citations["FAR 31.203"]
+	for _, c := range []string{"FAR Part 15", "FAR 15.404-1", "FAR Part 16"} {
+		tables.Citations[c] = row
+	}
+	tables.Templates["date_calculation"] = tables.Templates["rate_calculation"]
+	return tables
+}
+
 func postMusterJSON(t *testing.T, baseURL, token, path string, body any) (int, []byte) {
 	t.Helper()
 	rawBody, err := json.Marshal(body)
@@ -90,9 +102,9 @@ func TestWorkerEndToEndAllFourSubToolsAndSanitizedLogs(t *testing.T) {
 	// Append a canary phrase in an HTML comment to prove neither logs nor
 	// completed observation records copy vendor or agency text.
 	govHTMLWithCanary := append(append([]byte(nil), govHTML...), []byte("\n<!-- zzcanary-secret-phrase -->\n")...)
-	saasHTML := mustReadFixture(t, "saas-marketing/fixtures/observed-paid-matrix/page.html")
+	saasHTML := mustReadFixture(t, "saas-marketing/fixtures/observed-free-rate-tool/page.html")
 	pdfBytes := mustReadFixture(t, "agency-pdf/fixtures/observed-flate-worksheet/page.pdf")
-	spaCaptureRaw := mustReadFixture(t, "on-demand-browser-job/fixtures/observed-offline-sbom-spa/capture.json")
+	spaCaptureRaw := mustReadFixture(t, "on-demand-browser-job/fixtures/observed-public-rate-spa/capture.json")
 
 	var spaCap browserjob.Capture
 	if err := json.Unmarshal(spaCaptureRaw, &spaCap); err != nil {
@@ -179,6 +191,7 @@ func TestWorkerEndToEndAllFourSubToolsAndSanitizedLogs(t *testing.T) {
 		Muster:            musterClient,
 		Fetcher:           newTestFetcher(t, targetSrv, &stubBrowserRunner{capture: &spaCap}, 5*time.Second),
 		Registry:          reg,
+		Tables:            testTables(),
 		Spool:             sp,
 		Log:               &logBuf,
 		PollInterval:      10 * time.Millisecond,
@@ -234,7 +247,11 @@ func TestWorkerEndToEndAllFourSubToolsAndSanitizedLogs(t *testing.T) {
 		if strings.Contains(string(rawRec), "zzcanary-secret-phrase") {
 			t.Fatalf("results.sextant copied page text on %s", step.ID)
 		}
-		var rec observation.Record
+		var top map[string]json.RawMessage
+		if err := json.Unmarshal(rawRec, &top); err != nil || len(top) != 4 {
+			t.Fatalf("results.sextant on %s must hold exactly category, sub_tool, observed_on and facts: %v", step.ID, err)
+		}
+		var rec derive.Result
 		if err := json.Unmarshal(rawRec, &rec); err != nil {
 			t.Fatalf("unmarshal results.sextant on %s: %v", step.ID, err)
 		}
@@ -341,6 +358,7 @@ func TestWorkerPauseReplayTimeoutFailReleaseAndSpoolRecovery(t *testing.T) {
 		Muster:            musterClient,
 		Fetcher:           newTestFetcher(t, targetSrv, nil, 5*time.Second),
 		Registry:          reg,
+		Tables:            testTables(),
 		Spool:             sp,
 		PollInterval:      10 * time.Millisecond,
 		HeartbeatInterval: 15 * time.Millisecond,
@@ -397,6 +415,7 @@ func TestWorkerPauseReplayTimeoutFailReleaseAndSpoolRecovery(t *testing.T) {
 		Muster:            flakyClient,
 		Fetcher:           newTestFetcher(t, targetSrv, nil, 5*time.Second),
 		Registry:          reg,
+		Tables:            testTables(),
 		Spool:             sp,
 		PollInterval:      10 * time.Millisecond,
 		HeartbeatInterval: 50 * time.Millisecond,
@@ -426,6 +445,7 @@ func TestWorkerPauseReplayTimeoutFailReleaseAndSpoolRecovery(t *testing.T) {
 		Muster:            flakyClient,
 		Fetcher:           newTestFetcher(t, targetSrv, nil, 5*time.Second),
 		Registry:          reg,
+		Tables:            testTables(),
 		Spool:             spRecovered,
 		PollInterval:      10 * time.Millisecond,
 		HeartbeatInterval: 50 * time.Millisecond,
@@ -572,5 +592,56 @@ func TestWorkerDropsExpiredSpoolLeaseAndQuarantinesDisallowedMove(t *testing.T) 
 	pending, err := sp.Pending()
 	if err != nil || len(pending) != 0 {
 		t.Fatalf("expected stale lease entry removed, got %+v", pending)
+	}
+}
+
+func TestWorkerPausesAnItemWhoseCitationsHaveNoRow(t *testing.T) {
+	govHTML := mustReadFixture(t, "gov-portal/fixtures/observed-calculator/page.html")
+	targetSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(govHTML)
+	}))
+	defer targetSrv.Close()
+
+	hub := muster.NewStandIn()
+	hub.Seed([]muster.SeedItem{{
+		ID: "PA-0001", State: "recorded",
+		Found: &muster.Found{Source: "sam-gov", Title: "Gov Calc", Address: "https://calc.example.gov/tool"},
+	}})
+	hubSrv := httptest.NewServer(hub)
+	defer hubSrv.Close()
+	client, err := muster.NewHTTP(muster.HTTPConfig{BaseURL: hubSrv.URL, StaticToken: "sextant"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := tools.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp, err := spool.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logBuf bytes.Buffer
+	w, err := New(Config{Muster: client, Fetcher: newTestFetcher(t, targetSrv, nil, 5*time.Second), Registry: reg, Spool: sp, Log: &logBuf, Drain: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := w.StepOnce(context.Background()); err != nil || !worked {
+		t.Fatalf("StepOnce: worked=%v err=%v", worked, err)
+	}
+	if !strings.Contains(logBuf.String(), string(derive.NoCitationRow)) {
+		t.Errorf("log does not name the pause reason: %s", logBuf.String())
+	}
+	assay, err := muster.NewHTTP(muster.HTTPConfig{BaseURL: hubSrv.URL, StaticToken: "assay"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st, err := assay.Lease(context.Background()); err != nil || st != nil {
+		t.Fatalf("a paused item must not reach Assay: step=%+v err=%v", st, err)
 	}
 }

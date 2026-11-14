@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ClearedStack/sextant/internal/derive"
 	"github.com/ClearedStack/sextant/internal/errcode"
 	"github.com/ClearedStack/sextant/internal/fetch"
 	"github.com/ClearedStack/sextant/internal/muster"
@@ -34,6 +35,7 @@ type Config struct {
 	Muster            muster.Client
 	Fetcher           *fetch.Fetcher
 	Registry          *tools.Registry
+	Tables            derive.Tables // zero value: derive.Default()
 	Spool             *spool.Spool
 	Log               io.Writer
 	PollInterval      time.Duration
@@ -47,6 +49,7 @@ type Worker struct {
 	muster            muster.Client
 	fetcher           *fetch.Fetcher
 	registry          *tools.Registry
+	tables            derive.Tables
 	spool             *spool.Spool
 	log               io.Writer
 	pollInterval      time.Duration
@@ -72,6 +75,10 @@ func New(cfg Config) (*Worker, error) {
 	if cfg.ObservedOn != "" && !observation.ValidDate(cfg.ObservedOn) {
 		return nil, errors.New("worker: ObservedOn must be YYYY-MM-DD")
 	}
+	tables := cfg.Tables
+	if tables.Citations == nil && tables.Templates == nil {
+		tables = derive.Default()
+	}
 	poll := cfg.PollInterval
 	if poll <= 0 {
 		poll = defaultPollInterval
@@ -88,6 +95,7 @@ func New(cfg Config) (*Worker, error) {
 		muster:            cfg.Muster,
 		fetcher:           cfg.Fetcher,
 		registry:          cfg.Registry,
+		tables:            tables,
 		spool:             cfg.Spool,
 		log:               logOut,
 		pollInterval:      poll,
@@ -207,7 +215,7 @@ func (w *Worker) StepOnce(ctx context.Context) (bool, error) {
 		}
 	}()
 
-	rec, procErr := w.observeTarget(workCtx, step.ID, address, observedOn)
+	res, procErr := w.observeTarget(workCtx, step.ID, address, observedOn)
 
 	hbCancel()
 	<-hbDone
@@ -230,7 +238,7 @@ func (w *Worker) StepOnce(ctx context.Context) (bool, error) {
 			ItemID:  step.ID,
 			Outcome: spool.OutcomeComplete,
 			State:   "observed",
-			Record:  rec,
+			Result:  res,
 		}); err != nil {
 			return true, err
 		}
@@ -238,7 +246,7 @@ func (w *Worker) StepOnce(ctx context.Context) (bool, error) {
 			Event:   "observed",
 			ItemID:  step.ID,
 			Outcome: spool.OutcomeComplete,
-			SubTool: rec.SubTool,
+			SubTool: res.SubTool,
 		})
 		return true, w.flushSpool(ctx)
 	}
@@ -272,7 +280,7 @@ func (w *Worker) StepOnce(ctx context.Context) (bool, error) {
 	return true, w.flushSpool(ctx)
 }
 
-func (w *Worker) observeTarget(ctx context.Context, itemID, address, observedOn string) (*observation.Record, error) {
+func (w *Worker) observeTarget(ctx context.Context, itemID, address, observedOn string) (*derive.Result, error) {
 	res, err := w.fetcher.Fetch(ctx, address)
 	if res != nil {
 		defer res.Wipe()
@@ -280,12 +288,18 @@ func (w *Worker) observeTarget(ctx context.Context, itemID, address, observedOn 
 	if err != nil {
 		return nil, err
 	}
-	return w.registry.Observe(subtool.Target{
+	rec, err := w.registry.Observe(subtool.Target{
 		ItemID:     itemID,
 		URL:        res.FinalURL,
 		Page:       res.Body,
 		ObservedOn: observedOn,
 	})
+	if err != nil {
+		return nil, err
+	}
+	// The observation record stays inside Sextant. Only the derived result,
+	// of closed words and numbers, is staged and sent.
+	return w.tables.Derive(rec)
 }
 
 func (w *Worker) flushSpool(ctx context.Context) error {
@@ -297,7 +311,7 @@ func (w *Worker) flushSpool(ctx context.Context) error {
 		var sendErr error
 		switch entry.Outcome {
 		case spool.OutcomeComplete:
-			_, sendErr = w.muster.Complete(ctx, entry.Lease, entry.State, entry.Record)
+			_, sendErr = w.muster.Complete(ctx, entry.Lease, entry.State, entry.Result)
 		case spool.OutcomeNeedsSubtool:
 			_, sendErr = w.muster.NeedsSubtool(ctx, entry.Lease)
 		case spool.OutcomeFail:

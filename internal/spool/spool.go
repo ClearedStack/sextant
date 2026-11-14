@@ -16,8 +16,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ClearedStack/sextant/internal/derive"
 	"github.com/ClearedStack/sextant/internal/errcode"
-	"github.com/ClearedStack/sextant/internal/observation"
 )
 
 // DefaultDir is the writable emptyDir mount path in Kubernetes.
@@ -34,15 +34,15 @@ const (
 
 // Entry is one pending acknowledgment waiting to be delivered to Muster.
 type Entry struct {
-	Sequence    uint64              `json:"sequence"`
-	Lease       string              `json:"lease"`
-	ItemID      string              `json:"item_id"`
-	Outcome     Outcome             `json:"outcome"`
-	State       string              `json:"state,omitempty"`
-	Record      *observation.Record `json:"record,omitempty"`
-	Code        errcode.Code        `json:"code,omitempty"`
-	Reason      errcode.Reason      `json:"reason,omitempty"`
-	Fingerprint string              `json:"fingerprint,omitempty"`
+	Sequence    uint64         `json:"sequence"`
+	Lease       string         `json:"lease"`
+	ItemID      string         `json:"item_id"`
+	Outcome     Outcome        `json:"outcome"`
+	State       string         `json:"state,omitempty"`
+	Result      *derive.Result `json:"result,omitempty"`
+	Code        errcode.Code   `json:"code,omitempty"`
+	Reason      errcode.Reason `json:"reason,omitempty"`
+	Fingerprint string         `json:"fingerprint,omitempty"`
 
 	path string
 }
@@ -61,25 +61,25 @@ func (e *Entry) Validate() error {
 		if e.State != "observed" {
 			return errors.New("spool: complete entry must move state to observed")
 		}
-		if e.Record == nil {
-			return errors.New("spool: complete entry requires a record")
+		if e.Result == nil {
+			return errors.New("spool: complete entry requires a result")
 		}
-		if err := e.Record.Validate(); err != nil {
-			return fmt.Errorf("spool: invalid record: %w", err)
+		if err := e.Result.Validate(); err != nil {
+			return fmt.Errorf("spool: invalid result: %w", err)
 		}
 		if e.Code != "" || e.Reason != "" {
 			return errors.New("spool: complete entry cannot carry error fields")
 		}
 	case OutcomeNeedsSubtool:
-		if e.Record != nil || e.State != "" {
-			return errors.New("spool: needs_subtool entry cannot carry record or state")
+		if e.Result != nil || e.State != "" {
+			return errors.New("spool: needs_subtool entry cannot carry a result or state")
 		}
 		if e.Code != errcode.NeedsSubtool || e.Reason == "" {
 			return errors.New("spool: needs_subtool entry requires E_NEEDS_SUBTOOL and reason")
 		}
 	case OutcomeFail:
-		if e.Record != nil || e.State != "" {
-			return errors.New("spool: fail entry cannot carry record or state")
+		if e.Result != nil || e.State != "" {
+			return errors.New("spool: fail entry cannot carry a result or state")
 		}
 		if (e.Code != errcode.Timeout && e.Code != errcode.Parse) || e.Reason == "" {
 			return errors.New("spool: fail entry requires E_TIMEOUT or E_PARSE and reason")
