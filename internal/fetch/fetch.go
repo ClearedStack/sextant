@@ -414,6 +414,9 @@ func ParseLocalTestOrigin(s string) (string, bool) {
 	return s, true
 }
 
+// IsLocalTestOrigin reports whether u is on the configured local test origin.
+func (f *Fetcher) IsLocalTestOrigin(u *url.URL) bool { return f.isLocalOrigin(u) }
+
 // isLocalOrigin reports whether u is on the one configured local test origin.
 func (f *Fetcher) isLocalOrigin(u *url.URL) bool {
 	return f.localHost != "" && u != nil && u.Scheme == "http" && u.Host == f.localHost && u.User == nil

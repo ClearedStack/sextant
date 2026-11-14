@@ -648,12 +648,14 @@ func TestWorkerPausesAnItemWhoseCitationsHaveNoRow(t *testing.T) {
 	}
 }
 
-// leaseCounter is a stand-in Muster that offers the same E_TIMEOUT item every
-// time, as contract v1 does: a failed step stays in place and is offered again.
+// leaseCounter is a stand-in Muster that offers the same item every time, as
+// contract v1 does for a failed step. The path of the address follows paths,
+// one entry per lease, the last one repeating.
 type leaseCounter struct {
 	leases, fails int
 	cancel        context.CancelFunc
 	maxLeases     int
+	paths         []string
 }
 
 func (c *leaseCounter) Lease(context.Context) (*muster.Step, error) {
@@ -661,10 +663,11 @@ func (c *leaseCounter) Lease(context.Context) (*muster.Step, error) {
 	if c.leases >= c.maxLeases {
 		c.cancel() // a runaway loop ends here, so the test cannot hang
 	}
+	path := c.paths[min(c.leases, len(c.paths))-1]
 	return &muster.Step{
 		Lease: "PA-0001.1.1", Kind: "item", ID: "PA-0001", State: "recorded", Lane: "normal", Attempt: 1,
 		Expires: "2026-01-15T10:00:00Z",
-		Found:   &muster.Found{Address: "https://calc.example.gov/x"},
+		Found:   &muster.Found{Address: "https://calc.example.gov/" + path},
 	}, nil
 }
 func (c *leaseCounter) Heartbeat(context.Context, string) (*muster.HeartbeatReply, error) {
@@ -681,12 +684,22 @@ func (c *leaseCounter) NeedsSubtool(context.Context, string) (*muster.PauseReply
 	return &muster.PauseReply{}, nil
 }
 
-// runFailingWorker runs a worker whose every fetch times out, on a virtual
-// clock: sleeping adds to the clock and the run ends when a minute has gone.
-func runFailingWorker(t *testing.T) (leases int, sleeps []time.Duration) {
+// runWorkerOn runs a worker against the stand-in on a virtual clock and
+// returns the sleeps it asked for. The path "bad" makes the fetch time out (a
+// failed step); the path "pause" gives a page no sub-tool matches (a paused
+// step, not a failed one). The run ends at the stopAfter-th sleep.
+func runWorkerOn(t *testing.T, paths []string, stopAfter int) (leases int, sleeps []time.Duration) {
 	t.Helper()
 	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
+		switch r.URL.Path {
+		case "/robots.txt":
+			http.NotFound(w, r)
+		case "/pause":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			_, _ = w.Write([]byte("<!doctype html><html><body><h1>Static notice</h1></body></html>"))
+		default:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
 	}))
 	defer target.Close()
 	reg, err := tools.Load()
@@ -699,47 +712,53 @@ func runFailingWorker(t *testing.T) (leases int, sleeps []time.Duration) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	c := &leaseCounter{cancel: cancel, maxLeases: 500}
+	c := &leaseCounter{cancel: cancel, maxLeases: 500, paths: paths}
 	w, err := New(Config{Muster: c, Fetcher: newTestFetcher(t, target, nil, time.Second), Registry: reg, Spool: sp,
 		PollInterval: 2 * time.Second, HeartbeatInterval: time.Hour})
 	if err != nil {
 		t.Fatal(err)
 	}
-	var clock time.Duration
 	w.sleep = func(_ context.Context, d time.Duration) bool {
 		sleeps = append(sleeps, d)
-		clock += d
-		return clock <= time.Minute
+		return len(sleeps) < stopAfter
 	}
 	if err := w.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if c.fails != c.leases && ctx.Err() == nil {
-		t.Fatalf("leases %d, fails %d", c.leases, c.fails)
-	}
 	return c.leases, sleeps
 }
 
-func TestRunBacksOffAfterAFailedStep(t *testing.T) {
-	leases, sleeps := runFailingWorker(t)
-	if leases > 8 {
-		t.Fatalf("%d lease calls in one virtual minute: a failed step must back off", leases)
+func seconds(n ...int) []time.Duration {
+	out := make([]time.Duration, len(n))
+	for i, v := range n {
+		out[i] = time.Duration(v) * time.Second
 	}
-	// 2s, 4s, 8s, 16s, 32s, then capped at 32 times the poll interval (64s).
-	want := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second}
-	for i, d := range want {
-		if i >= len(sleeps) || sleeps[i] != d {
-			t.Fatalf("sleeps = %v, want to start with %v", sleeps, want)
-		}
+	return out
+}
+
+// With a 2 s poll interval the pauses are 1x, 2x, 4x, 8x, 16x, 32x and then
+// 32x again: doubled for each failure in a row, and no more than 32x.
+func TestBackoffDoublesToAFixedCapAndStaysThere(t *testing.T) {
+	leases, sleeps := runWorkerOn(t, []string{"bad"}, 8)
+	want := seconds(2, 4, 8, 16, 32, 64, 64, 64)
+	if fmt.Sprint(sleeps) != fmt.Sprint(want) {
+		t.Fatalf("sleeps = %v, want %v", sleeps, want)
 	}
-	for _, d := range sleeps {
-		if d > 64*time.Second {
-			t.Fatalf("backoff %v is above the bound", d)
-		}
+	if leases != 8 {
+		t.Fatalf("%d lease calls for 8 pauses", leases)
 	}
-	l2, s2 := runFailingWorker(t)
+	l2, s2 := runWorkerOn(t, []string{"bad"}, 8)
 	if l2 != leases || fmt.Sprint(s2) != fmt.Sprint(sleeps) {
 		t.Fatal("backoff is not deterministic")
+	}
+}
+
+// A step that is not a failure ends the streak: the next failure waits 1x.
+func TestBackoffResetsAfterAStepThatDidNotFail(t *testing.T) {
+	_, sleeps := runWorkerOn(t, []string{"bad", "bad", "bad", "pause", "bad"}, 4)
+	want := seconds(2, 4, 8, 2) // the paused step adds no pause, the next failure starts again
+	if fmt.Sprint(sleeps) != fmt.Sprint(want) {
+		t.Fatalf("sleeps = %v, want %v", sleeps, want)
 	}
 }
 
@@ -793,5 +812,28 @@ func TestWorkerObservesAPageOnTheLocalTestOrigin(t *testing.T) {
 	}
 	if strings.Contains(string(st.Results["sextant"]), "127.0.0.1") {
 		t.Fatal("the address must not reach the result")
+	}
+}
+
+func TestOnlyTheLocalTestOriginIsRewrittenToHTTPS(t *testing.T) {
+	local := fetch.New(fetch.Config{LocalTestOrigin: "http://127.0.0.1:8080"})
+	parse := func(raw string) *url.URL {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return u
+	}
+	if got := observationURL(local, parse("http://127.0.0.1:8080/page?x=1")); got.String() != "https://127.0.0.1:8080/page?x=1" {
+		t.Errorf("the local origin must be rewritten, got %s", got)
+	}
+	for _, raw := range []string{"http://example.com/x", "http://127.0.0.1:9090/page", "http://[::1]:8080/page", "https://example.com/x"} {
+		if got := observationURL(local, parse(raw)); got.String() != raw {
+			t.Errorf("%s must not be rewritten, got %s", raw, got)
+		}
+	}
+	// With no local origin configured nothing is rewritten at all.
+	if got := observationURL(fetch.New(fetch.Config{}), parse("http://127.0.0.1:8080/page")); got.Scheme != "http" {
+		t.Errorf("rewritten without a local origin: %s", got)
 	}
 }

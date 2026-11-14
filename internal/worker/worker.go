@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -324,15 +325,7 @@ func (w *Worker) observeTarget(ctx context.Context, itemID, address, observedOn 
 	if err != nil {
 		return nil, err
 	}
-	target := res.FinalURL
-	if target.Scheme == "http" {
-		// Only the fetcher's local test origin gets this far over http. The
-		// observation record wants an https address and never leaves Sextant,
-		// so it is written with the same host and path under https.
-		u := *target
-		u.Scheme = "https"
-		target = &u
-	}
+	target := observationURL(w.fetcher, res.FinalURL)
 	rec, err := w.registry.Observe(subtool.Target{
 		ItemID:     itemID,
 		URL:        target,
@@ -464,6 +457,19 @@ func safeItemToken(id string) string {
 		return id
 	}
 	return "PA-0000"
+}
+
+// observationURL is the address written into the internal observation record.
+// The record wants https. The one http address that can get this far is the
+// fetcher's local test origin, so only that is rewritten (same host and path
+// under https); anything else is left as it is. The record never leaves Sextant.
+func observationURL(f *fetch.Fetcher, u *url.URL) *url.URL {
+	if !f.IsLocalTestOrigin(u) {
+		return u
+	}
+	c := *u
+	c.Scheme = "https"
+	return &c
 }
 
 func sleepContext(ctx context.Context, d time.Duration) bool {

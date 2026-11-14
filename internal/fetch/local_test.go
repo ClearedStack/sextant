@@ -132,6 +132,26 @@ func TestWithoutLocalTestOriginLocalhostIsRefused(t *testing.T) {
 	wantForbidden(t, err)
 }
 
+func TestIsLocalTestOriginIsExact(t *testing.T) {
+	f := New(Config{LocalTestOrigin: "http://127.0.0.1:8080"})
+	for raw, want := range map[string]bool{
+		"http://127.0.0.1:8080/x": true, "http://127.0.0.1:8080": true,
+		"https://127.0.0.1:8080/x": false, "http://127.0.0.1:8081/x": false, "http://localhost:8080/x": false,
+		"http://u@127.0.0.1:8080/x": false, "http://example.com/x": false,
+	} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := f.IsLocalTestOrigin(u); got != want {
+			t.Errorf("IsLocalTestOrigin(%s) = %v, want %v", raw, got, want)
+		}
+	}
+	if f.IsLocalTestOrigin(nil) || New(Config{}).IsLocalTestOrigin(&url.URL{Scheme: "http", Host: "127.0.0.1:8080"}) {
+		t.Error("nil, or no configured origin, must be false")
+	}
+}
+
 func TestARedirectIntoTheLocalOriginFromElsewhereIsRefused(t *testing.T) {
 	srv := localServer(t)
 	f := New(Config{Timeout: time.Second, LocalTestOrigin: srv.URL})
