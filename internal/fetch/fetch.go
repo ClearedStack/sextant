@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +60,10 @@ type Config struct {
 	Transport            http.RoundTripper
 	Browser              BrowserRunner
 	AllowPrivateNetworks bool // for local httptest servers in unit tests only
+	// LocalTestOrigin is one origin, http://127.0.0.1:<port> or
+	// http://[::1]:<port>, fetched without the public-https checks. Test runs
+	// only; see ParseLocalTestOrigin. An invalid value is ignored.
+	LocalTestOrigin string
 }
 
 // Fetcher fetches public HTTPS pages passively.
@@ -66,6 +72,7 @@ type Fetcher struct {
 	client       *http.Client
 	browser      BrowserRunner
 	allowPrivate bool
+	localHost    string // host:port of the one local test origin, or empty
 }
 
 // New builds a passive HTTPS Fetcher.
@@ -79,6 +86,9 @@ func New(cfg Config) *Fetcher {
 		browser:      cfg.Browser,
 		allowPrivate: cfg.AllowPrivateNetworks,
 	}
+	if origin, ok := ParseLocalTestOrigin(cfg.LocalTestOrigin); ok {
+		f.localHost = strings.TrimPrefix(origin, "http://")
+	}
 	rt := cfg.Transport
 	if rt == nil {
 		dialer := &net.Dialer{Timeout: 10 * time.Second}
@@ -90,7 +100,7 @@ func New(cfg Config) *Fetcher {
 			TLSHandshakeTimeout:   10 * time.Second,
 			ResponseHeaderTimeout: timeout,
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-				if !f.allowPrivate {
+				if !f.allowPrivate && addr != f.localHost {
 					if err := checkDialAddress(ctx, addr); err != nil {
 						return nil, err
 					}
@@ -105,6 +115,11 @@ func New(cfg Config) *Fetcher {
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= maxRedirects {
 				return errcode.New(errcode.NeedsSubtool, errcode.RedirectLimitExceeded)
+			}
+			// A redirect may not leave the local test origin, nor enter it from
+			// anywhere else.
+			if len(via) > 0 && f.isLocalOrigin(via[0].URL) != f.isLocalOrigin(req.URL) {
+				return errcode.New(errcode.Parse, errcode.ForbiddenTargetHost)
 			}
 			return f.validateTargetURL(req.URL)
 		},
@@ -149,6 +164,9 @@ func (f *Fetcher) Fetch(ctx context.Context, rawURL string) (*Result, error) {
 	finalURL := resp.Request.URL
 	if err := f.validateTargetURL(finalURL); err != nil {
 		return nil, err
+	}
+	if f.isLocalOrigin(finalURL) != f.isLocalOrigin(u) {
+		return nil, errcode.New(errcode.Parse, errcode.ForbiddenTargetHost)
 	}
 	if finalURL.Host != u.Host {
 		if err := f.checkRobots(ctx, finalURL); err != nil {
@@ -277,6 +295,9 @@ func (f *Fetcher) checkRobots(ctx context.Context, target *url.URL) error {
 }
 
 func (f *Fetcher) validateTargetURL(u *url.URL) error {
+	if f.isLocalOrigin(u) {
+		return nil
+	}
 	if u == nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Opaque != "" {
 		return errcode.New(errcode.Parse, errcode.ForbiddenTargetHost)
 	}
@@ -374,4 +395,26 @@ func classifyTransportError(err error) error {
 		return errcode.New(errcode.Timeout, errcode.DeadlineExceeded)
 	}
 	return errcode.New(errcode.Timeout, errcode.UpstreamUnavailable)
+}
+
+var localOriginPattern = regexp.MustCompile(`^http://(127\.0\.0\.1|\[::1\]):([1-9][0-9]{0,4})$`)
+
+// ParseLocalTestOrigin returns s if it is exactly one allowed local test
+// origin: http://127.0.0.1:<port> or http://[::1]:<port>, port 1 to 65535, no
+// path, query, fragment, user, space or any other character. Otherwise it
+// returns "", false.
+func ParseLocalTestOrigin(s string) (string, bool) {
+	m := localOriginPattern.FindStringSubmatch(s)
+	if m == nil {
+		return "", false
+	}
+	if port, err := strconv.Atoi(m[2]); err != nil || port > 65535 {
+		return "", false
+	}
+	return s, true
+}
+
+// isLocalOrigin reports whether u is on the one configured local test origin.
+func (f *Fetcher) isLocalOrigin(u *url.URL) bool {
+	return f.localHost != "" && u != nil && u.Scheme == "http" && u.Host == f.localHost && u.User == nil
 }

@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -643,5 +645,153 @@ func TestWorkerPausesAnItemWhoseCitationsHaveNoRow(t *testing.T) {
 	}
 	if st, err := assay.Lease(context.Background()); err != nil || st != nil {
 		t.Fatalf("a paused item must not reach Assay: step=%+v err=%v", st, err)
+	}
+}
+
+// leaseCounter is a stand-in Muster that offers the same E_TIMEOUT item every
+// time, as contract v1 does: a failed step stays in place and is offered again.
+type leaseCounter struct {
+	leases, fails int
+	cancel        context.CancelFunc
+	maxLeases     int
+}
+
+func (c *leaseCounter) Lease(context.Context) (*muster.Step, error) {
+	c.leases++
+	if c.leases >= c.maxLeases {
+		c.cancel() // a runaway loop ends here, so the test cannot hang
+	}
+	return &muster.Step{
+		Lease: "PA-0001.1.1", Kind: "item", ID: "PA-0001", State: "recorded", Lane: "normal", Attempt: 1,
+		Expires: "2026-01-15T10:00:00Z",
+		Found:   &muster.Found{Address: "https://calc.example.gov/x"},
+	}, nil
+}
+func (c *leaseCounter) Heartbeat(context.Context, string) (*muster.HeartbeatReply, error) {
+	return &muster.HeartbeatReply{}, nil
+}
+func (c *leaseCounter) Complete(context.Context, string, string, any) (*muster.CompleteReply, error) {
+	return nil, errors.New("unexpected complete")
+}
+func (c *leaseCounter) Fail(context.Context, string, errcode.Code) (*muster.FailReply, error) {
+	c.fails++
+	return &muster.FailReply{}, nil
+}
+func (c *leaseCounter) NeedsSubtool(context.Context, string) (*muster.PauseReply, error) {
+	return &muster.PauseReply{}, nil
+}
+
+// runFailingWorker runs a worker whose every fetch times out, on a virtual
+// clock: sleeping adds to the clock and the run ends when a minute has gone.
+func runFailingWorker(t *testing.T) (leases int, sleeps []time.Duration) {
+	t.Helper()
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer target.Close()
+	reg, err := tools.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp, err := spool.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := &leaseCounter{cancel: cancel, maxLeases: 500}
+	w, err := New(Config{Muster: c, Fetcher: newTestFetcher(t, target, nil, time.Second), Registry: reg, Spool: sp,
+		PollInterval: 2 * time.Second, HeartbeatInterval: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var clock time.Duration
+	w.sleep = func(_ context.Context, d time.Duration) bool {
+		sleeps = append(sleeps, d)
+		clock += d
+		return clock <= time.Minute
+	}
+	if err := w.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if c.fails != c.leases && ctx.Err() == nil {
+		t.Fatalf("leases %d, fails %d", c.leases, c.fails)
+	}
+	return c.leases, sleeps
+}
+
+func TestRunBacksOffAfterAFailedStep(t *testing.T) {
+	leases, sleeps := runFailingWorker(t)
+	if leases > 8 {
+		t.Fatalf("%d lease calls in one virtual minute: a failed step must back off", leases)
+	}
+	// 2s, 4s, 8s, 16s, 32s, then capped at 32 times the poll interval (64s).
+	want := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 32 * time.Second}
+	for i, d := range want {
+		if i >= len(sleeps) || sleeps[i] != d {
+			t.Fatalf("sleeps = %v, want to start with %v", sleeps, want)
+		}
+	}
+	for _, d := range sleeps {
+		if d > 64*time.Second {
+			t.Fatalf("backoff %v is above the bound", d)
+		}
+	}
+	l2, s2 := runFailingWorker(t)
+	if l2 != leases || fmt.Sprint(s2) != fmt.Sprint(sleeps) {
+		t.Fatal("backoff is not deterministic")
+	}
+}
+
+// TestWorkerObservesAPageOnTheLocalTestOrigin is the test-run path: one local
+// http origin is fetched, and the item still reaches "observed".
+func TestWorkerObservesAPageOnTheLocalTestOrigin(t *testing.T) {
+	page := mustReadFixture(t, "saas-marketing/fixtures/observed-free-rate-tool/page.html")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/robots.txt" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(page)
+	}))
+	defer srv.Close()
+
+	hub := muster.NewStandIn()
+	hub.Seed([]muster.SeedItem{{ID: "PA-0001", State: "recorded", Found: &muster.Found{Source: "web-sweep", Title: "Local", Address: srv.URL + "/pricing"}}})
+	hubSrv := httptest.NewServer(hub)
+	defer hubSrv.Close()
+	client, err := muster.NewHTTP(muster.HTTPConfig{BaseURL: hubSrv.URL, StaticToken: "sextant"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg, err := tools.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp, err := spool.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := New(Config{
+		Muster: client, Fetcher: fetch.New(fetch.Config{Timeout: 5 * time.Second, LocalTestOrigin: srv.URL}),
+		Registry: reg, Tables: testTables(), Spool: sp, Drain: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := w.StepOnce(context.Background()); err != nil || !worked {
+		t.Fatalf("StepOnce: worked=%v err=%v", worked, err)
+	}
+	assay, err := muster.NewHTTP(muster.HTTPConfig{BaseURL: hubSrv.URL, StaticToken: "assay"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := assay.Lease(context.Background())
+	if err != nil || st == nil || st.ID != "PA-0001" || st.State != "observed" {
+		t.Fatalf("the local page must reach observed: step=%+v err=%v", st, err)
+	}
+	if strings.Contains(string(st.Results["sextant"]), "127.0.0.1") {
+		t.Fatal("the address must not reach the result")
 	}
 }

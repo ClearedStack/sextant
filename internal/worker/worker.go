@@ -56,6 +56,9 @@ type Worker struct {
 	heartbeatInterval time.Duration
 	observedOn        string
 	drain             bool
+	sleep             func(context.Context, time.Duration) bool // sleepContext; tests replace it
+	lastFailed        bool                                      // the last step ended in fail
+	failStreak        int                                       // consecutive failed steps
 }
 
 // New validates cfg and builds a Worker.
@@ -103,6 +106,7 @@ func New(cfg Config) (*Worker, error) {
 		heartbeatInterval: hb,
 		observedOn:        cfg.ObservedOn,
 		drain:             cfg.Drain,
+		sleep:             sleepContext,
 	}, nil
 }
 
@@ -128,26 +132,55 @@ func (w *Worker) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			if !sleepContext(ctx, w.pollInterval) {
+			if !w.sleep(ctx, w.pollInterval) {
 				return nil
 			}
 			continue
 		}
 		if worked {
+			if !w.lastFailed {
+				w.failStreak = 0
+				continue
+			}
+			// Contract v1 keeps a failed (E_TIMEOUT) step in place and offers it
+			// again at once, so without a pause this loop would hammer the item.
+			w.failStreak++
+			if !w.sleep(ctx, w.failBackoff()) {
+				return nil
+			}
 			continue
 		}
+		w.failStreak = 0
 		if w.drain {
 			return nil
 		}
-		if !sleepContext(ctx, w.pollInterval) {
+		if !w.sleep(ctx, w.pollInterval) {
 			return nil
 		}
 	}
 }
 
+// maxBackoffDoublings bounds the backoff at 32 times the poll interval.
+const maxBackoffDoublings = 5
+
+// failBackoff is the pause after the failStreak-th failed step in a row: the
+// poll interval, doubled for each further failure, up to a fixed bound. No
+// randomness: the same failures give the same pauses.
+func (w *Worker) failBackoff() time.Duration {
+	n := w.failStreak - 1
+	if n > maxBackoffDoublings {
+		n = maxBackoffDoublings
+	}
+	if n < 0 {
+		n = 0
+	}
+	return w.pollInterval << n
+}
+
 // StepOnce flushes any spooled outcomes and, if the spool is clear, leases and
 // processes at most one item from Muster. It reports whether a step was leased.
 func (w *Worker) StepOnce(ctx context.Context) (bool, error) {
+	w.lastFailed = false
 	if err := w.flushSpool(ctx); err != nil {
 		return false, err
 	}
@@ -169,6 +202,7 @@ func (w *Worker) StepOnce(ctx context.Context) (bool, error) {
 	address, observedOn, valid := w.extractTarget(step)
 	if !valid {
 		coded := errcode.New(errcode.Parse, errcode.BrokenLease)
+		w.lastFailed = true
 		if _, stageErr := w.spool.Stage(spool.Entry{
 			Lease:       step.Lease,
 			ItemID:      safeID,
@@ -260,6 +294,7 @@ func (w *Worker) StepOnce(ctx context.Context) (bool, error) {
 	if coded.Code == errcode.NeedsSubtool {
 		outcome = spool.OutcomeNeedsSubtool
 	}
+	w.lastFailed = outcome == spool.OutcomeFail
 	if _, err := w.spool.Stage(spool.Entry{
 		Lease:       step.Lease,
 		ItemID:      step.ID,
@@ -289,9 +324,18 @@ func (w *Worker) observeTarget(ctx context.Context, itemID, address, observedOn 
 	if err != nil {
 		return nil, err
 	}
+	target := res.FinalURL
+	if target.Scheme == "http" {
+		// Only the fetcher's local test origin gets this far over http. The
+		// observation record wants an https address and never leaves Sextant,
+		// so it is written with the same host and path under https.
+		u := *target
+		u.Scheme = "https"
+		target = &u
+	}
 	rec, err := w.registry.Observe(subtool.Target{
 		ItemID:     itemID,
-		URL:        res.FinalURL,
+		URL:        target,
 		Page:       res.Body,
 		ObservedOn: observedOn,
 	})

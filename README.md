@@ -109,6 +109,12 @@ Raw HTML and PDF bytes are wiped in memory immediately after extraction and are 
 2. **Assay (`ClearedStack/assay`):** `results.sextant` now has the four keys and 22 pricing facts Assay's decoder reads. Assay must accept the `Designed` tier (its own PR) before the build facts parse, and its `private_by_design` gate must accept `Designed` for `emits_tracking` and `connect_src_self` or items pause there.
 3. **Keelworks, Lazarette, and Shipkeeper:** Build `./cmd/sextant` with `ko` (`linux/arm64`), push and sign the image in Lazarette, replace the reproducible binary SHA-256 placeholder in [`deploy/sextant.yaml`](deploy/sextant.yaml) with the pushed OCI manifest digest, and provide a digest-pinned headless browser runner (or controller sidecar) if on-demand SPA rendering is enabled.
 
+## Test-only setting: `SEXTANT_LOCAL_TEST_ORIGIN`
+
+For end-to-end test runs only. Set it to exactly one origin, `http://127.0.0.1:<port>` or `http://[::1]:<port>` (port 1 to 65535, nothing after it), and `sextant work` fetches pages from that origin over plain http, without the public-https and private-address checks. Every other address keeps them. A redirect away from that origin, or into it from anywhere else, is refused. Any other value makes `sextant work` exit 2 with a fixed message that does not repeat the value, and a valid value logs one fixed warning line at startup. It is off when unset or empty. `deploy/` must never set it, and a test fails if it does.
+
+When a step fails (`fail`, for example `E_TIMEOUT`), Muster keeps the item in place and offers it again at once, so `sextant work` waits before the next lease: the poll interval, doubled for each further failure in a row, up to 32 times the poll interval, with no randomness. A completed or paused item resets it.
+
 ## In this repository
 
 | Path | What it is |

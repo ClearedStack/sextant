@@ -230,8 +230,17 @@ func runWork(ctx context.Context, args []string, stderr io.Writer, usage func(st
 	if err != nil {
 		return usage("cannot initialize Muster client")
 	}
+	localOrigin := ""
+	if v := os.Getenv("SEXTANT_LOCAL_TEST_ORIGIN"); v != "" {
+		var ok bool
+		if localOrigin, ok = fetch.ParseLocalTestOrigin(v); !ok {
+			return usage("SEXTANT_LOCAL_TEST_ORIGIN must be http://127.0.0.1:<port> or http://[::1]:<port>")
+		}
+		fmt.Fprintln(stderr, `{"event":"local_test_origin_enabled","warning":"test only: one local http origin is fetched without the public https checks"}`)
+	}
 	fetcher := fetch.New(fetch.Config{
-		Timeout: *fetchTimeout,
+		Timeout:         *fetchTimeout,
+		LocalTestOrigin: localOrigin,
 	})
 	w, err := worker.New(worker.Config{
 		Muster:            client,

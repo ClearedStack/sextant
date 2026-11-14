@@ -260,3 +260,40 @@ func TestWorkCommand(t *testing.T) {
 		t.Fatalf("expected sanitized credential error, got status=%d stderr=%q", status, stderr)
 	}
 }
+
+func TestLocalTestOriginIsValidatedStrictlyAndWarnedAbout(t *testing.T) {
+	hubSrv := httptest.NewServer(muster.NewStandIn())
+	defer hubSrv.Close()
+	tokenFile := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(tokenFile, []byte("sextant\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	work := func() (string, int) {
+		_, stderr, status := observe(t, []string{"work", "-muster-url", hubSrv.URL, "-token-file", tokenFile,
+			"-spool", t.TempDir(), "-poll-every", "10ms", "-drain"}, "")
+		return stderr, status
+	}
+	const warning = `{"event":"local_test_origin_enabled","warning":"test only: one local http origin is fetched without the public https checks"}`
+
+	t.Setenv("SEXTANT_LOCAL_TEST_ORIGIN", "")
+	if stderr, status := work(); status != exitOK || strings.Contains(stderr, "local_test_origin") {
+		t.Fatalf("unset: status=%d stderr=%q", status, stderr)
+	}
+	for _, v := range []string{"http://127.0.0.1:8080", "http://[::1]:8080"} {
+		t.Setenv("SEXTANT_LOCAL_TEST_ORIGIN", v)
+		stderr, status := work()
+		if status != exitOK || strings.Count(stderr, warning) != 1 {
+			t.Fatalf("%s: status=%d stderr=%q", v, status, stderr)
+		}
+	}
+	for _, v := range []string{"http://127.0.0.1:8080/", "https://127.0.0.1:8080", "http://localhost:8080", "http://10.0.0.1:8080", "127.0.0.1:8080", " http://127.0.0.1:8080", "zzcanary-secret"} {
+		t.Setenv("SEXTANT_LOCAL_TEST_ORIGIN", v)
+		stderr, status := work()
+		if status != exitUsage || !strings.Contains(stderr, "sextant: SEXTANT_LOCAL_TEST_ORIGIN must be http://127.0.0.1:<port> or http://[::1]:<port>") {
+			t.Fatalf("%q: status=%d stderr=%q", v, status, stderr)
+		}
+		if strings.Contains(stderr, strings.TrimSpace(v)) {
+			t.Fatalf("the value was echoed: %q", stderr)
+		}
+	}
+}

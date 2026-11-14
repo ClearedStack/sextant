@@ -144,6 +144,31 @@ func TestKoAndDeployManifestsEnforceClusterHardening(t *testing.T) {
 	}
 }
 
+// TestDeployNeverSetsTheLocalTestOrigin: SEXTANT_LOCAL_TEST_ORIGIN switches off
+// the public-https checks for one origin. It is for test runs only, so nothing
+// under deploy/ may mention it.
+func TestDeployNeverSetsTheLocalTestOrigin(t *testing.T) {
+	root := filepath.Join(repoRoot(t), "deploy")
+	n := 0
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		n++
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(raw), "LOCAL_TEST_ORIGIN") {
+			t.Errorf("%s mentions SEXTANT_LOCAL_TEST_ORIGIN", path)
+		}
+		return nil
+	})
+	if err != nil || n == 0 {
+		t.Fatalf("walked %d files under deploy/: %v", n, err)
+	}
+}
+
 func TestRepositoryContainsNoEmDashes(t *testing.T) {
 	root := repoRoot(t)
 	emDash := "\u2014"
